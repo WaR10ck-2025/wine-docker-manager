@@ -3,19 +3,29 @@ FROM ubuntu:22.04
 # Verhindert interaktive Prompts während apt-install
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 32-bit Multiarch für Wine32 aktivieren
-RUN dpkg --add-architecture i386 && apt-get update && \
+# 32-bit Multiarch + WineHQ-Repository (Wine 9.x statt Ubuntu 6.x)
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-        # Wine
-        wine wine32 wine64 \
+        curl wget ca-certificates gnupg \
+    && mkdir -pm755 /etc/apt/keyrings && \
+    curl -fsSL https://dl.winehq.org/wine-builds/winehq.key \
+        | gpg --dearmor -o /etc/apt/keyrings/winehq.gpg && \
+    echo "deb [arch=amd64,i386 signed-by=/etc/apt/keyrings/winehq.gpg] https://dl.winehq.org/wine-builds/ubuntu/ jammy main" \
+        > /etc/apt/sources.list.d/winehq.list && \
+    apt-get update && \
+    apt-get install -y --install-recommends winehq-stable && \
+    apt-get install -y --no-install-recommends \
         # GUI / VNC Stack
         xvfb x11vnc \
         # noVNC + WebSocket-Proxy
         novnc websockify python3 \
         # Wine-Hilfswerkzeuge
         winetricks cabextract \
+        # USB (libusb für WINEUSB)
+        libusb-1.0-0 \
         # Basis-Tools
-        curl wget ca-certificates bash \
+        bash \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-Root User anlegen
