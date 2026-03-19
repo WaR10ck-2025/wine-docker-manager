@@ -24,18 +24,13 @@ services:
     volumes:
       - wine-prefix:/home/wineuser/.wine
       - uploads:/uploads
+      - /dev/bus/usb:/dev/bus/usb   # USB-Bus für Autocom CDP+
     ports:
       - "5900:5900"   # VNC direkt
       - "8090:8080"   # noVNC Browser (8080 auf Umbrel belegt)
-    # USB-Durchreiche (auskommentiert — nach Bedarf aktivieren):
-    # devices:
-    #   - /dev/ttyUSB0:/dev/ttyUSB0
-    #   - /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_XXXXXXXX:/dev/ttyUSB0
-    # device_cgroup_rules:
-    #   - 'c 189:* rwm'   # Alle USB-Geräte (Hotplug)
-    #   - 'c 13:* rwm'    # hidraw/input Geräte
-    # volumes (zusätzlich für USB-Bus):
-    #   - /dev/bus/usb:/dev/bus/usb
+    # Autocom CDP+ USB (FTDI 0403:d6da, libusb/WinUSB)
+    device_cgroup_rules:
+      - 'c 189:* rwm'   # Alle USB-Geräte (major 189)
     restart: unless-stopped
     networks:
       - wine-net
