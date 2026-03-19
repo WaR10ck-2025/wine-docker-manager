@@ -14,6 +14,7 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 echo "[Wine-Desktop] Starte virtuellen Display..."
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
 Xvfb :99 -screen 0 1280x800x24 -ac &
 XVFB_PID=$!
 sleep 1
