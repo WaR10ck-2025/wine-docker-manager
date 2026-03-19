@@ -27,7 +27,7 @@ wineboot --init 2>/dev/null || true
 sleep 2
 
 echo "[Wine-Desktop] Starte VNC-Server auf Port 5900..."
-x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet -noxauth &
+x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet &
 sleep 1
 
 echo "[Wine-Desktop] Starte noVNC auf Port 8080..."
