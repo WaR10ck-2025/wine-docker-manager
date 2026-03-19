@@ -1,0 +1,56 @@
+##### DietPi Pre-Configuration — Autocom USB/IP Headless Server #####
+#
+# Diese Datei auf die FAT32 Boot-Partition des geflashten USB-Sticks kopieren.
+# DietPi liest sie beim ersten Boot und konfiguriert alles automatisch.
+#
+# Nach dem Anpassen:
+#   1. DietPi Image mit Rufus/balenaEtcher auf USB-Stick flashen
+#   2. Boot-Partition öffnen (erscheint als Laufwerk in Windows)
+#   3. Diese Datei + dietpi-wifi.txt + Automation_Custom_Script.sh dort ablegen
+#   4. USB-Stick in MEEGOPAD stecken + starten
+#   5. ~10 Min warten → SSH mit: ssh root@<ip> (Passwort: dietpi)
+#
+######################################################################
+
+# ── Sprache & Region ──────────────────────────────────────────────
+AUTO_SETUP_LOCALE=de_DE.UTF-8
+AUTO_SETUP_KEYBOARD_LAYOUT=de
+AUTO_SETUP_TIMEZONE=Europe/Berlin
+
+# ── Netzwerk ──────────────────────────────────────────────────────
+AUTO_SETUP_NET_ETHERNET_ENABLED=1
+AUTO_SETUP_NET_WIFI_ENABLED=1
+AUTO_SETUP_NET_WIFI_COUNTRY_CODE=DE
+
+# Statische IP (optional — leer lassen für DHCP)
+#AUTO_SETUP_NET_STATIC_IP=192.168.10.200
+#AUTO_SETUP_NET_STATIC_MASK=255.255.255.0
+#AUTO_SETUP_NET_STATIC_GATEWAY=192.168.10.1
+#AUTO_SETUP_NET_STATIC_DNS=192.168.10.1
+
+# ── SSH Server ────────────────────────────────────────────────────
+# -2 = OpenSSH (empfohlen), -1 = Dropbear (minimal)
+AUTO_SETUP_SSH_SERVER_INDEX=-2
+
+# ── Passwort ──────────────────────────────────────────────────────
+# ÄNDERN! Gilt für root und dietpi User.
+AUTO_SETUP_GLOBAL_PASSWORD=dietpi
+
+# ── Headless / Kein Desktop ───────────────────────────────────────
+AUTO_SETUP_HEADLESS=1
+
+# ── Vollautomatischer First-Boot ──────────────────────────────────
+# Keine interaktiven Fragen beim ersten Start.
+AUTO_SETUP_AUTOMATED=1
+
+# ── Automation-Skript ─────────────────────────────────────────────
+# Automation_Custom_Script.sh wird nach dem Setup automatisch ausgeführt.
+# Muss ebenfalls auf die Boot-Partition kopiert werden.
+AUTO_SETUP_CUSTOM_SCRIPT_EXEC=1
+
+# ── Telemetrie deaktivieren ───────────────────────────────────────
+SURVEY_OPTED_IN=0
+
+# ── Keine Software vorinstallieren ───────────────────────────────
+# (USB/IP wird via Automation_Custom_Script.sh installiert)
+AUTO_SETUP_INSTALL_SOFTWARE_ID=

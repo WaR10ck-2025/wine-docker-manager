@@ -2,8 +2,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # USB/IP Server — Headless Mini-PC Setup
 # Teilt den Autocom CDP+ (FTDI 0403:d6da) über das Netzwerk (Port 3240).
-# Unterstützt: Debian, Ubuntu, Raspberry Pi OS
-# Idempotent: mehrfach ausführbar ohne Schaden
+#
+# Unterstützte Systeme:
+#   - DietPi (Debian Bookworm/Bullseye, x86_64)
+#   - Debian 11/12
+#   - Ubuntu 22.04/24.04
+#   - Raspberry Pi OS
+#
+# Idempotent: mehrfach ausführbar ohne Schaden.
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 
@@ -22,56 +28,86 @@ info()    { echo -e "${GREEN}[usbip]${NC} $1"; }
 warning() { echo -e "${YELLOW}[usbip]${NC} $1"; }
 error()   { echo -e "${RED}[usbip]${NC} $1"; exit 1; }
 
-# Root-Prüfung
 [ "$(id -u)" = "0" ] || error "Bitte als root ausführen: sudo bash install.sh"
 
-info "USB/IP Server Setup für Autocom CDP+ (FTDI ${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT})"
+# OS erkennen
+DISTRO="unknown"
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO="${ID:-unknown}"
+fi
+info "USB/IP Server Setup — System: ${PRETTY_NAME:-$DISTRO}"
 echo ""
 
-# ── 1. Paketquellen & Installation ──────────────────────────────────────────
+# ── 1. Pakete installieren ───────────────────────────────────────────────────
 info "Installiere USB/IP Tools..."
 apt-get update -qq
 
-# linux-tools-generic enthält usbip auf Ubuntu/Debian
-# Raspberry Pi OS: usbip ist in linux-tools-common oder rpi-usbip
-if apt-cache show linux-tools-generic &>/dev/null; then
-    apt-get install -y --no-install-recommends linux-tools-generic linux-tools-common kmod
-elif apt-cache show usbip &>/dev/null; then
-    apt-get install -y --no-install-recommends usbip kmod
-else
-    # Fallback: linux-tools für aktuellen Kernel
+# Debian/DietPi: Paket heißt 'usbip' (aus linux-tools-common)
+# Ubuntu:        'linux-tools-generic' + 'linux-tools-common'
+if [ "$DISTRO" = "ubuntu" ]; then
     KERNEL=$(uname -r)
-    apt-get install -y --no-install-recommends "linux-tools-${KERNEL}" linux-tools-common kmod || \
-        error "Konnte usbip nicht installieren. Bitte manuell: apt-get install usbip"
+    apt-get install -y --no-install-recommends \
+        linux-tools-common \
+        "linux-tools-${KERNEL}" \
+        kmod 2>/dev/null || \
+    apt-get install -y --no-install-recommends \
+        linux-tools-common linux-tools-generic kmod
+else
+    # Debian / DietPi / Raspberry Pi OS
+    apt-get install -y --no-install-recommends usbip kmod
 fi
 
-# usbipd-Binär suchen
+# usbipd-Binär suchen (Pfad je nach Distro verschieden)
 USBIPD_BIN=""
-for p in /usr/sbin/usbipd /usr/bin/usbipd /usr/lib/linux-tools/*/usbipd; do
-    [ -x "$p" ] && USBIPD_BIN="$p" && break
+for p in \
+    /usr/sbin/usbipd \
+    /usr/bin/usbipd \
+    /usr/lib/linux-tools/*/usbipd \
+    /usr/lib/linux-tools-*/usbipd; do
+    if [ -x "$p" ]; then
+        USBIPD_BIN="$p"
+        break
+    fi
 done
-[ -n "$USBIPD_BIN" ] || error "usbipd nicht gefunden nach Installation."
-info "usbipd gefunden: $USBIPD_BIN"
+
+# Fallback: which
+if [ -z "$USBIPD_BIN" ]; then
+    USBIPD_BIN=$(which usbipd 2>/dev/null || true)
+fi
+[ -n "$USBIPD_BIN" ] || error "usbipd nicht gefunden. Bitte manuell: apt-get install usbip"
 
 USBIP_BIN=""
-for p in /usr/sbin/usbip /usr/bin/usbip /usr/lib/linux-tools/*/usbip; do
-    [ -x "$p" ] && USBIP_BIN="$p" && break
+for p in \
+    /usr/sbin/usbip \
+    /usr/bin/usbip \
+    /usr/lib/linux-tools/*/usbip \
+    /usr/lib/linux-tools-*/usbip; do
+    if [ -x "$p" ]; then
+        USBIP_BIN="$p"
+        break
+    fi
 done
-[ -n "$USBIP_BIN" ] || error "usbip nicht gefunden nach Installation."
+if [ -z "$USBIP_BIN" ]; then
+    USBIP_BIN=$(which usbip 2>/dev/null || true)
+fi
+[ -n "$USBIP_BIN" ] || error "usbip nicht gefunden."
 
-# ── 2. Kernel-Module laden ───────────────────────────────────────────────────
+info "usbipd: $USBIPD_BIN"
+info "usbip:  $USBIP_BIN"
+
+# ── 2. Kernel-Module ─────────────────────────────────────────────────────────
 info "Lade Kernel-Module..."
-modprobe usbip-core  || warning "usbip-core konnte nicht geladen werden"
-modprobe usbip-host  || warning "usbip-host konnte nicht geladen werden"
+modprobe usbip-core 2>/dev/null || warning "usbip-core: Kernel-Modul nicht verfügbar"
+modprobe usbip-host 2>/dev/null || warning "usbip-host: Kernel-Modul nicht verfügbar"
 
-# Persistent machen
-grep -q "usbip-core" "$MODULES_FILE" || echo "usbip-core" >> "$MODULES_FILE"
-grep -q "usbip-host" "$MODULES_FILE" || echo "usbip-host" >> "$MODULES_FILE"
-info "Kernel-Module werden beim Boot geladen (${MODULES_FILE})"
+# Beim Boot laden
+grep -q "usbip-core" "$MODULES_FILE" 2>/dev/null || echo "usbip-core" >> "$MODULES_FILE"
+grep -q "usbip-host" "$MODULES_FILE" 2>/dev/null || echo "usbip-host" >> "$MODULES_FILE"
 
 # ── 3. Systemd Service ───────────────────────────────────────────────────────
 info "Richte systemd Service ein..."
-cat > "$SERVICE_FILE" << EOF
+cat > "$SERVICE_FILE" << UNIT
 [Unit]
 Description=USB/IP Server (Autocom CDP+ Headless)
 After=network.target
@@ -82,26 +118,26 @@ Type=forking
 ExecStartPre=/sbin/modprobe usbip-core
 ExecStartPre=/sbin/modprobe usbip-host
 ExecStart=${USBIPD_BIN} -D
-ExecStartPost=/bin/bash -c 'sleep 2 && BID=\$(${USBIP_BIN} list -l 2>/dev/null | grep "${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT}" | grep -oP "(?<=busid )\\S+" | head -1) && [ -n "\$BID" ] && ${USBIP_BIN} bind --busid "\$BID" && echo "[usbip] Gerät \$BID gebunden" || echo "[usbip] Gerät nicht gefunden (noch nicht eingesteckt?)"'
+ExecStartPost=/bin/bash -c 'sleep 2 && BID=\$(${USBIP_BIN} list -l 2>/dev/null | grep "${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT}" | grep -oP "(?<=busid )\\S+" | head -1) && [ -n "\$BID" ] && ${USBIP_BIN} bind --busid "\$BID" && echo "[usbip] Gerät \$BID gebunden" || echo "[usbip] Gerät ${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT} nicht gefunden (noch nicht eingesteckt?)"'
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-EOF
+UNIT
 
 systemctl daemon-reload
 systemctl enable usbipd.service
 info "Service aktiviert: usbipd.service"
 
-# ── 4. udev-Regel für Auto-Bind beim Einstecken ──────────────────────────────
-info "Richte udev-Regel ein (Auto-Bind bei USB-Einstecken)..."
-cat > "$UDEV_RULE" << EOF
+# ── 4. udev-Regel (Auto-Bind bei Einstecken) ────────────────────────────────
+info "Richte udev-Regel ein..."
+cat > "$UDEV_RULE" << UDEV
 # Autocom CDP+ (FTDI ${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT}) — USB/IP Auto-Bind
-ACTION=="add", SUBSYSTEM=="usb", \
-  ATTR{idVendor}=="${AUTOCOM_VENDOR}", ATTR{idProduct}=="${AUTOCOM_PRODUCT}", \
+ACTION=="add", SUBSYSTEM=="usb", \\
+  ATTR{idVendor}=="${AUTOCOM_VENDOR}", ATTR{idProduct}=="${AUTOCOM_PRODUCT}", \\
   RUN+="/bin/systemctl restart usbipd.service"
-EOF
+UDEV
 udevadm control --reload-rules
 info "udev-Regel installiert: $UDEV_RULE"
 
@@ -110,28 +146,28 @@ info "Starte USB/IP Server..."
 systemctl restart usbipd.service
 sleep 2
 
-# Status ausgeben
 if systemctl is-active --quiet usbipd.service; then
     info "usbipd läuft ✓"
 else
-    warning "usbipd hat Probleme — prüfe: journalctl -u usbipd.service"
+    warning "usbipd hat Probleme — prüfe: journalctl -u usbipd.service -n 20"
 fi
 
-# Geräte anzeigen
 echo ""
 info "Verfügbare USB-Geräte:"
-${USBIP_BIN} list -l 2>/dev/null || true
+$USBIP_BIN list -l 2>/dev/null || warning "usbip list fehlgeschlagen"
 
-# ── 6. Netzwerk-Info ─────────────────────────────────────────────────────────
+# ── 6. Zusammenfassung ───────────────────────────────────────────────────────
+IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
-IP=$(hostname -I | awk '{print $1}')
-info "──────────────────────────────────────────"
-info "Mini-PC IP-Adresse:  ${IP}"
-info "USB/IP Port:          3240"
+info "══════════════════════════════════════════════"
+info "Setup abgeschlossen!"
 info ""
-info "Diesen Wert in docker-compose.yml setzen:"
-info "  USBIP_REMOTE_HOST: \"${IP}\""
+info "Mini-PC IP:   ${IP:-<IP unbekannt>}"
+info "USB/IP Port:  3240"
 info ""
-info "Windows VM (einmalig, in der VM ausführen):"
-info "  .\\windows-usbip-autoconnect.ps1 -MiniPcIp ${IP}"
-info "──────────────────────────────────────────"
+info "In docker-compose.yml setzen:"
+info "  USBIP_REMOTE_HOST: \"${IP:-<mini-pc-ip>}\""
+info ""
+info "Autocom CDP+ jetzt einstecken — wird automatisch gebunden."
+info "Status prüfen: systemctl status usbipd"
+info "══════════════════════════════════════════════"
