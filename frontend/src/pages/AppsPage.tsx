@@ -5,6 +5,7 @@ export default function AppsPage() {
   const [apps, setApps] = useState<InstalledApp[]>([])
   const [loading, setLoading] = useState(true)
   const [launching, setLaunching] = useState<string | null>(null)
+  const [launched, setLaunched] = useState<string | null>(null)
 
   useEffect(() => {
     listApps()
@@ -15,8 +16,15 @@ export default function AppsPage() {
 
   const handleLaunch = async (app: InstalledApp) => {
     setLaunching(app.exe)
-    await launchApp(app.exe).catch((e) => alert(`Fehler: ${e.message}`))
-    setTimeout(() => setLaunching(null), 2000)
+    try {
+      await launchApp(app.exe)
+      setLaunched(app.exe)
+      setTimeout(() => setLaunched(null), 4000)
+    } catch (e: any) {
+      alert(`Fehler: ${e.message}`)
+    } finally {
+      setLaunching(null)
+    }
   }
 
   if (loading) {
@@ -59,9 +67,17 @@ export default function AppsPage() {
                 <button
                   onClick={() => handleLaunch(app)}
                   disabled={launching === app.exe}
-                  className="text-xs bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white px-3 py-1 rounded"
+                  className={`text-xs disabled:opacity-50 text-white px-3 py-1 rounded transition-colors ${
+                    launched === app.exe
+                      ? 'bg-blue-700'
+                      : 'bg-green-700 hover:bg-green-600'
+                  }`}
                 >
-                  {launching === app.exe ? '⏳' : '▶ Starten'}
+                  {launching === app.exe
+                    ? '⏳ Starte...'
+                    : launched === app.exe
+                      ? '✓ Gestartet → Desktop'
+                      : '▶ Starten'}
                 </button>
               </div>
             ))}
