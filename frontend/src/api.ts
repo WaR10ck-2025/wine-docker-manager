@@ -46,6 +46,34 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
   return r.json()
 }
 
+/** Upload mit Fortschritts-Callback (0–100). Nutzt XHR statt fetch. */
+export function uploadFileWithProgress(
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<UploadedFile> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const form = new FormData()
+    form.append('file', file)
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText))
+      } else {
+        reject(new Error(xhr.responseText || `HTTP ${xhr.status}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Netzwerkfehler beim Upload'))
+
+    xhr.open('POST', `${BASE}/upload`)
+    xhr.send(form)
+  })
+}
+
 export async function deleteUpload(filename: string): Promise<void> {
   const r = await fetch(`${BASE}/uploads/${encodeURIComponent(filename)}`, { method: 'DELETE' })
   if (!r.ok) throw new Error(await r.text())

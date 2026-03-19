@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { deleteUpload, installApp, listUploads, uploadFile, UploadedFile } from '../api'
+import { deleteUpload, installApp, listUploads, uploadFileWithProgress, UploadedFile } from '../api'
 import LogStream from '../components/LogStream'
 
 function formatBytes(b: number) {
@@ -12,6 +12,8 @@ export default function InstallPage() {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number>(0)
+  const [uploadingName, setUploadingName] = useState<string>('')
   const [activePid, setActivePid] = useState<number | null>(null)
   const [doneMsg, setDoneMsg] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -23,9 +25,15 @@ export default function InstallPage() {
   const handleFiles = useCallback(async (fileList: FileList) => {
     setUploading(true)
     for (const f of Array.from(fileList)) {
-      await uploadFile(f).catch((e) => alert(`Upload fehlgeschlagen: ${e.message}`))
+      setUploadingName(f.name)
+      setUploadProgress(0)
+      await uploadFileWithProgress(f, setUploadProgress).catch(
+        (e) => alert(`Upload fehlgeschlagen: ${e.message}`)
+      )
     }
     setUploading(false)
+    setUploadProgress(0)
+    setUploadingName('')
     refresh()
   }, [])
 
@@ -58,9 +66,20 @@ export default function InstallPage() {
           dragging ? 'border-wine-500 bg-wine-500/10' : 'border-gray-700 hover:border-gray-500'
         }`}
       >
-        <p className="text-gray-400 text-sm">
-          {uploading ? '⏳ Lädt hoch...' : '.exe / .msi hierher ziehen oder klicken'}
-        </p>
+        {uploading ? (
+          <div className="w-full space-y-2">
+            <p className="text-sm text-gray-300 truncate">{uploadingName}</p>
+            <div className="w-full bg-gray-800 rounded-full h-3 overflow-hidden">
+              <div
+                className="h-3 bg-wine-500 rounded-full transition-all duration-200"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400">{uploadProgress}%</p>
+          </div>
+        ) : (
+          <p className="text-gray-400 text-sm">.exe / .msi hierher ziehen oder klicken</p>
+        )}
         <input
           ref={fileRef}
           type="file"
