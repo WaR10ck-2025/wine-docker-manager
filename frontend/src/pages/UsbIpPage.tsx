@@ -1,11 +1,23 @@
 /**
  * UsbIpPage — Verwaltet den USB/IP-Server.
- * Zwei Modi:
+ * Drei Modi:
  *   1. Lokaler Server: Umbrel teilt Autocom → Windows-PC im LAN
  *   2. Mini-PC Headless: Headless Linux-PC teilt Autocom → Windows-VM auf Umbrel
+ *   3. OBD2 Live: Echtzeit-Fahrzeugdaten vom Mini-PC (wenn verbunden)
  */
-import { useEffect, useState } from 'react'
-import { BASE, usbIpRemoteStatus, type UsbIpRemoteStatus } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import {
+  BASE,
+  obdClearDtcs,
+  obdDtcs,
+  obdStatus,
+  obdStream,
+  usbIpRemoteStatus,
+  type ObdData,
+  type ObdDtcs,
+  type ObdStatus,
+  type UsbIpRemoteStatus,
+} from '../api'
 
 interface UsbIpStatus {
   running: boolean
@@ -18,7 +30,14 @@ export default function UsbIpPage() {
   const [remoteStatus, setRemoteStatus] = useState<UsbIpRemoteStatus | null>(null)
   const [loading, setLoading]           = useState(true)
   const [busy, setBusy]                 = useState(false)
-  const [activeTab, setActiveTab]       = useState<'local' | 'remote'>('local')
+  const [activeTab, setActiveTab]       = useState<'local' | 'remote' | 'obd'>('local')
+
+  // OBD2 State
+  const [obdConnStatus, setObdConnStatus] = useState<ObdStatus | null>(null)
+  const [obdLiveData, setObdLiveData]     = useState<ObdData | null>(null)
+  const [obdFaultCodes, setObdFaultCodes] = useState<ObdDtcs | null>(null)
+  const [clearingDtcs, setClearingDtcs]   = useState(false)
+  const obdStreamCleanup = useRef<(() => void) | null>(null)
 
   const fetchStatus = () =>
     fetch(`${BASE}/usbip/status`)
@@ -32,12 +51,39 @@ export default function UsbIpPage() {
       .then(setRemoteStatus)
       .catch(console.error)
 
+  // OBD2 Status alle 5s pollen (unabhängig vom Tab)
+  const fetchObdStatus = () =>
+    obdStatus().then(setObdConnStatus).catch(() => {})
+
   useEffect(() => {
     fetchStatus()
     fetchRemote()
-    const t = setInterval(() => { fetchStatus(); fetchRemote() }, 5000)
+    fetchObdStatus()
+    const t = setInterval(() => { fetchStatus(); fetchRemote(); fetchObdStatus() }, 5000)
     return () => clearInterval(t)
   }, [])
+
+  // SSE-Stream starten/stoppen wenn OBD-Tab aktiv
+  useEffect(() => {
+    if (activeTab === 'obd') {
+      obdDtcs().then(setObdFaultCodes).catch(() => {})
+      const cleanup = obdStream(setObdLiveData)
+      obdStreamCleanup.current = cleanup
+      return () => { cleanup(); obdStreamCleanup.current = null }
+    } else {
+      obdStreamCleanup.current?.()
+      obdStreamCleanup.current = null
+    }
+  }, [activeTab])
+
+  const handleClearDtcs = async () => {
+    if (!confirm('Alle Fehlercodes löschen? (Motorlampelle erlischt)')) return
+    setClearingDtcs(true)
+    await obdClearDtcs().catch(console.error)
+    const fresh = await obdDtcs().catch(() => null)
+    if (fresh) setObdFaultCodes(fresh)
+    setClearingDtcs(false)
+  }
 
   const toggle = async () => {
     setBusy(true)
@@ -64,6 +110,12 @@ export default function UsbIpPage() {
             <span className={`ml-2 w-1.5 h-1.5 rounded-full inline-block ${
               remoteStatus.reachable ? 'bg-green-500' : 'bg-red-500'
             }`} />
+          )}
+        </TabBtn>
+        <TabBtn active={activeTab === 'obd'} onClick={() => setActiveTab('obd')}>
+          🚗 OBD2 Live
+          {obdConnStatus?.connected && (
+            <span className="ml-2 w-1.5 h-1.5 rounded-full inline-block bg-green-500" />
           )}
         </TabBtn>
       </div>
@@ -257,6 +309,114 @@ ssh user@<mini-pc-ip>`}
           </p>
         </div>
       )}
+
+      {/* ── Tab: OBD2 Live ─────────────────────────────────────────────────── */}
+      {activeTab === 'obd' && (
+        <div className="space-y-4">
+
+          {/* Verbindungsstatus */}
+          <div className="bg-gray-900 border border-gray-800 rounded p-3 flex items-center gap-3">
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+              obdConnStatus?.connected ? 'bg-green-500' : 'bg-red-500'
+            }`} />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm text-gray-300">
+                {obdConnStatus?.connected
+                  ? `Verbunden — Protokoll: ${obdConnStatus.protocol?.toUpperCase()}, Port: ${obdConnStatus.port}`
+                  : obdConnStatus?.error ?? 'Getrennt — OBD2 Monitor prüfen'}
+              </span>
+            </div>
+            {obdConnStatus?.protocol && (
+              <span className="text-xs px-2 py-0.5 rounded bg-blue-900 text-blue-300 font-mono flex-shrink-0">
+                {obdConnStatus.protocol === 'elm327' ? 'ELM327' : 'ISO 9141-2'}
+              </span>
+            )}
+          </div>
+
+          {/* Gauges — 3-Spalten Grid */}
+          <div className="grid grid-cols-3 gap-3">
+            <GaugeCard title="MOTOR">
+              <GaugeRow label="RPM"       value={obdLiveData?.rpm}              unit="rpm" />
+              <GaugeRow label="Kühlmittel" value={obdLiveData?.coolant_temp}    unit="°C" />
+              <GaugeRow label="Batterie"  value={obdLiveData?.battery_voltage}  unit="V" decimals={1} />
+            </GaugeCard>
+            <GaugeCard title="FAHRT">
+              <GaugeRow label="Geschw."   value={obdLiveData?.speed}            unit="km/h" />
+              <GaugeRow label="Last"      value={obdLiveData?.engine_load}      unit="%" decimals={1} />
+            </GaugeCard>
+            <GaugeCard title="KRAFTSTOFF">
+              <GaugeRow label="Trim Kurz" value={obdLiveData?.short_fuel_trim}  unit="%" decimals={1} signed />
+              <GaugeRow label="Trim Lang" value={obdLiveData?.long_fuel_trim}   unit="%" decimals={1} signed />
+            </GaugeCard>
+          </div>
+
+          {/* Drosselklappe-Balken */}
+          <div className="bg-gray-900 border border-gray-800 rounded p-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-500 w-24 flex-shrink-0">Drosselklappe</span>
+              <div className="flex-1 bg-gray-800 rounded-full h-2">
+                <div
+                  className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${Math.min(obdLiveData?.throttle ?? 0, 100)}%` }}
+                />
+              </div>
+              <span className="text-xs text-gray-300 w-10 text-right flex-shrink-0">
+                {obdLiveData?.throttle != null ? `${obdLiveData.throttle.toFixed(0)}%` : '--'}
+              </span>
+            </div>
+          </div>
+
+          {/* DTCs */}
+          <div className="bg-gray-900 border border-gray-800 rounded p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
+                Fehlercodes (DTCs)
+                <span className="ml-2 text-gray-600 normal-case font-normal">
+                  {obdFaultCodes != null ? `${obdFaultCodes.count} Einträge` : ''}
+                </span>
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => obdDtcs().then(setObdFaultCodes).catch(() => {})}
+                  className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:text-gray-200"
+                >
+                  ↻ Aktualisieren
+                </button>
+                <button
+                  onClick={handleClearDtcs}
+                  disabled={clearingDtcs || !obdConnStatus?.connected}
+                  className="text-xs px-2 py-1 rounded bg-red-900 text-red-300 hover:bg-red-800 disabled:opacity-40"
+                >
+                  {clearingDtcs ? '...' : '✕ Löschen'}
+                </button>
+              </div>
+            </div>
+
+            {!obdFaultCodes || obdFaultCodes.count === 0 ? (
+              <p className="text-xs text-green-500">Keine Fehlercodes gespeichert ✓</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {obdFaultCodes.codes.map((dtc) => (
+                  <span key={dtc.code} className="text-xs font-mono px-2 py-1 rounded bg-red-950 text-red-400 border border-red-900">
+                    {dtc.code}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* SSH-Tipp */}
+          <div className="bg-gray-900 border border-gray-800 rounded p-3 space-y-1">
+            <p className="text-xs text-gray-500 font-medium">SSH Terminal-Dashboard</p>
+            <code className="block bg-black rounded px-3 py-2 text-green-400 text-xs">
+              ssh root@autocom-usbip "obd-monitor"
+            </code>
+            <p className="text-xs text-gray-600">
+              OBD2 API: Port 8765 &nbsp;|&nbsp; install: bash usbip-client/obd-monitor/install_obd.sh
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -290,6 +450,32 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         <p className="text-gray-300 text-xs font-medium mb-1">{title}</p>
         {children}
       </div>
+    </div>
+  )
+}
+
+function GaugeCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded p-3 space-y-2">
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{title}</p>
+      {children}
+    </div>
+  )
+}
+
+function GaugeRow({
+  label, value, unit, decimals = 0, signed = false,
+}: {
+  label: string; value: number | null | undefined; unit: string; decimals?: number; signed?: boolean
+}) {
+  const display = value != null
+    ? `${signed && value > 0 ? '+' : ''}${value.toFixed(decimals)} ${unit}`
+    : '--'
+  const color = value != null ? 'text-white' : 'text-gray-600'
+  return (
+    <div className="flex justify-between items-baseline">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={`text-sm font-mono ${color}`}>{display}</span>
     </div>
   )
 }

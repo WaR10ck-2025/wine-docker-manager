@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 import aiofiles
+import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -255,6 +256,9 @@ USBIP_CONTAINER = os.getenv("USBIP_CONTAINER", "wine-usbip-server")
 WINDOWS_VM_CONTAINER = os.getenv("WINDOWS_VM_CONTAINER", "wine-windows-vm")
 # IP-Adresse des headless Mini-PCs mit USB/IP Server (leer = nicht konfiguriert)
 USBIP_REMOTE_HOST = os.getenv("USBIP_REMOTE_HOST", "")
+# OBD2 Monitor Service auf dem Mini-PC (Port 8765)
+OBD_MONITOR_HOST = os.getenv("OBD_MONITOR_HOST", "")
+OBD_MONITOR_PORT = int(os.getenv("OBD_MONITOR_PORT", "8765"))
 
 
 def _container_running(name: str) -> bool:
@@ -321,6 +325,74 @@ def usbip_remote_status():
     except Exception:
         reachable = False
     return {"configured": True, "reachable": reachable, "host": USBIP_REMOTE_HOST}
+
+
+# ── OBD2 Monitor (Proxy → Mini-PC Port 8765) ────────────────────────────────
+
+def _obd_base_url() -> str:
+    return f"http://{OBD_MONITOR_HOST}:{OBD_MONITOR_PORT}"
+
+
+@app.get("/obd/status")
+async def obd_status():
+    """OBD2 Verbindungsstatus vom Mini-PC."""
+    if not OBD_MONITOR_HOST:
+        return {"connected": False, "protocol": None, "port": None, "error": "OBD_MONITOR_HOST nicht konfiguriert"}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(f"{_obd_base_url()}/obd/status")
+            return r.json()
+    except Exception as e:
+        return {"connected": False, "protocol": None, "port": None, "error": str(e)}
+
+
+@app.get("/obd/data")
+async def obd_data():
+    """Aktueller OBD2-Datensatz (RPM, Geschwindigkeit, Temp. etc.)."""
+    if not OBD_MONITOR_HOST:
+        raise HTTPException(503, "OBD_MONITOR_HOST nicht konfiguriert")
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        r = await client.get(f"{_obd_base_url()}/obd/data")
+        r.raise_for_status()
+        return r.json()
+
+
+@app.get("/obd/dtcs")
+async def obd_dtcs():
+    """Gespeicherte Fehlercodes (DTCs) vom Fahrzeug lesen."""
+    if not OBD_MONITOR_HOST:
+        raise HTTPException(503, "OBD_MONITOR_HOST nicht konfiguriert")
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.get(f"{_obd_base_url()}/obd/dtcs")
+        r.raise_for_status()
+        return r.json()
+
+
+@app.post("/obd/clear-dtcs")
+async def obd_clear_dtcs():
+    """Gespeicherte Fehlercodes löschen (Mode 04)."""
+    if not OBD_MONITOR_HOST:
+        raise HTTPException(503, "OBD_MONITOR_HOST nicht konfiguriert")
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.post(f"{_obd_base_url()}/obd/clear-dtcs")
+        r.raise_for_status()
+        return r.json()
+
+
+@app.get("/obd/stream")
+async def obd_stream():
+    """SSE-Stream: leitet OBD2-Daten vom Mini-PC weiter (~2Hz)."""
+    if not OBD_MONITOR_HOST:
+        raise HTTPException(503, "OBD_MONITOR_HOST nicht konfiguriert")
+
+    async def generator() -> AsyncGenerator[str, None]:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", f"{_obd_base_url()}/obd/stream") as resp:
+                async for line in resp.aiter_lines():
+                    if line.startswith("data:"):
+                        yield f"{line}\n\n"
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
 # ── Windows VM ──────────────────────────────────────────────────────────────

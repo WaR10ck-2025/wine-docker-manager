@@ -36,6 +36,32 @@ export interface UsbIpRemoteStatus {
   host: string
 }
 
+// ── OBD2 ───────────────────────────────────────────────────────────────────
+
+export interface ObdData {
+  rpm: number | null
+  speed: number | null
+  coolant_temp: number | null
+  throttle: number | null
+  engine_load: number | null
+  short_fuel_trim: number | null
+  long_fuel_trim: number | null
+  battery_voltage: number | null
+  timestamp_ms: number
+}
+
+export interface ObdStatus {
+  connected: boolean
+  protocol: 'elm327' | 'iso9141' | null
+  port: string | null
+  error: string | null
+}
+
+export interface ObdDtcs {
+  codes: { code: string; description: string }[]
+  count: number
+}
+
 // ── Uploads ────────────────────────────────────────────────────────────────
 
 export async function listUploads(): Promise<UploadedFile[]> {
@@ -135,6 +161,40 @@ export async function usbIpRemoteStatus(): Promise<UsbIpRemoteStatus> {
   const r = await fetch(`${BASE}/usbip/remote/status`)
   if (!r.ok) throw new Error(await r.text())
   return r.json()
+}
+
+export async function obdStatus(): Promise<ObdStatus> {
+  const r = await fetch(`${BASE}/obd/status`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function obdData(): Promise<ObdData> {
+  const r = await fetch(`${BASE}/obd/data`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function obdDtcs(): Promise<ObdDtcs> {
+  const r = await fetch(`${BASE}/obd/dtcs`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function obdClearDtcs(): Promise<{ success: boolean; message: string }> {
+  const r = await fetch(`${BASE}/obd/clear-dtcs`, { method: 'POST' })
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+/** SSE-Stream: ruft onData bei jedem OBD2-Update auf (~2Hz), gibt cleanup-Funktion zurück */
+export function obdStream(onData: (d: ObdData) => void): () => void {
+  const es = new EventSource(`${BASE}/obd/stream`)
+  es.onmessage = (e) => {
+    try { onData(JSON.parse(e.data)) } catch { /* ignore parse errors */ }
+  }
+  es.onerror = () => es.close()
+  return () => es.close()
 }
 
 export async function winetricksInstall(component: string): Promise<InstallResult> {

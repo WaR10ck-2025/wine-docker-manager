@@ -1,0 +1,14 @@
+[Unit]
+Description=OBD2 Monitor Service (Autocom CDP+ HTTP API)
+After=usbipd.service
+Wants=usbipd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/obd-monitor
+ExecStart=/opt/obd-monitor-venv/bin/uvicorn obd_service:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+pyserial==3.5
+rich==13.7.1
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-obd==0.7.1
