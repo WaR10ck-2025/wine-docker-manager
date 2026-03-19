@@ -48,8 +48,8 @@ services:
       UPLOAD_DIR: /uploads
       WINE_CONTAINER_PREFIX: /home/wineuser/.wine   # Pfad im wine-desktop Container
       LOCAL_WINEPREFIX: /wine-prefix                 # Pfad im manager-api Container (Volume root = .wine Inhalt)
-      USBIP_REMOTE_HOST: "192.168.10.193"            # IP des headless Mini-PCs (NanoPi R5C)
-      OBD_MONITOR_HOST: "192.168.10.193"             # IP des Mini-PCs für OBD2 API (= USBIP_REMOTE_HOST)
+      USBIP_REMOTE_HOST: "192.168.10.194"            # IP des headless Mini-PCs (NanoPi R5C, WLAN)
+      OBD_MONITOR_HOST: "192.168.10.194"             # IP des Mini-PCs für OBD2 API (WLAN, primär)
       OBD_MONITOR_PORT: "8765"                       # Port des obd_service.py
     volumes:
       - uploads:/uploads
