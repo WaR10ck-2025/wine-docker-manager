@@ -1,0 +1,16 @@
+##### DietPi WiFi-Konfiguration — NanoPi R5C #####
+#
+# M.2 Key-E WiFi-Modul erforderlich (z.B. FriendlyElec AP6256, Intel AX200/AX210).
+# SSID und Passwort eintragen, dann auf Boot-Partition kopieren.
+#
+##################################################
+
+# Primäres WLAN
+aWIFI_SSID[0]='Dein-WLAN-Name'
+aWIFI_KEY[0]='Dein-WLAN-Passwort'
+aWIFI_KEYMGR[0]='WPA-PSK'
+
+# Zweites Netzwerk (optional, z.B. mobiler Hotspot als Fallback)
+#aWIFI_SSID[1]=''
+#aWIFI_KEY[1]=''
+#aWIFI_KEYMGR[1]='WPA-PSK'

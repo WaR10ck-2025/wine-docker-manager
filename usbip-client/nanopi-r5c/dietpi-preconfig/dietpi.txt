@@ -19,9 +19,10 @@ AUTO_SETUP_LOCALE=de_DE.UTF-8
 AUTO_SETUP_KEYBOARD_LAYOUT=de
 AUTO_SETUP_TIMEZONE=Europe/Berlin
 
-# ── Netzwerk — nur Ethernet (NanoPi R5C hat kein internes WiFi) ───
+# ── Netzwerk — Ethernet + WiFi (M.2 Key-E Modul: AP6256 / Intel AX200 / AX210) ──
 AUTO_SETUP_NET_ETHERNET_ENABLED=1
-AUTO_SETUP_NET_WIFI_ENABLED=0
+AUTO_SETUP_NET_WIFI_ENABLED=1
+AUTO_SETUP_NET_WIFI_COUNTRY_CODE=DE
 
 # Statische IP (optional — leer lassen für DHCP)
 #AUTO_SETUP_NET_STATIC_IP=192.168.10.201
