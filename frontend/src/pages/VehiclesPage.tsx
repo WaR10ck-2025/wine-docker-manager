@@ -223,7 +223,7 @@ function VehicleCard({
   onDelete: () => void
   onSaveDtc: () => void
 }) {
-  const lastSession = v.dtc_history.at(-1)
+  const lastSession = v.dtc_history[v.dtc_history.length - 1]
   const lastDate = lastSession
     ? new Date(lastSession.date).toLocaleDateString('de-DE')
     : null
