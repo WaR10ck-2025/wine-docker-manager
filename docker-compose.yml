@@ -26,7 +26,7 @@ services:
       - uploads:/uploads
     ports:
       - "5900:5900"   # VNC direkt
-      - "8080:8080"   # noVNC Browser
+      - "8090:8080"   # noVNC Browser (8080 auf Umbrel belegt)
     # USB-Durchreiche (auskommentiert — nach Bedarf aktivieren):
     # devices:
     #   - /dev/ttyUSB0:/dev/ttyUSB0
