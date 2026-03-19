@@ -1,12 +1,15 @@
 #!/bin/bash
 set -e
 
+# Hintergrundjobs (x11vnc, websockify) sollen Fehler nicht propagieren
+trap '' ERR
+
 # ── Als root: Volume-Ownership korrigieren, dann zu wineuser wechseln ────────
 if [ "$(id -u)" = "0" ]; then
     echo "[Wine-Desktop] Korrigiere Volume-Ownership für wineuser..."
     chown -R wineuser:wineuser /home/wineuser /uploads /app 2>/dev/null || true
     echo "[Wine-Desktop] Wechsle zu wineuser..."
-    exec su -s /bin/bash wineuser -c "exec /start.sh"
+    exec su - wineuser -s /bin/bash -c "exec /start.sh"
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -20,7 +23,7 @@ wineboot --init 2>/dev/null || true
 sleep 2
 
 echo "[Wine-Desktop] Starte VNC-Server auf Port 5900..."
-x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet &
+x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet -noxauth &
 sleep 1
 
 echo "[Wine-Desktop] Starte noVNC auf Port 8080..."
