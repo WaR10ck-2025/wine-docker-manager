@@ -1,0 +1,8 @@
+# udev-Regel: Autocom CDP+ (FTDI 0403:d6da) beim Einstecken automatisch via USB/IP binden.
+# Installation: sudo cp 99-autocom-usbip.rules /etc/udev/rules.d/
+#               sudo udevadm control --reload-rules
+#
+# Wird von install.sh automatisch eingerichtet.
+ACTION=="add", SUBSYSTEM=="usb", \
+  ATTR{idVendor}=="0403", ATTR{idProduct}=="d6da", \
+  RUN+="/bin/systemctl restart usbipd.service"

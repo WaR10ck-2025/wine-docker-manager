@@ -1,0 +1,19 @@
+# Systemd Service für USB/IP Server (Autocom CDP+ headless)
+# Wird von install.sh automatisch installiert.
+# Manuell: sudo cp usbipd.service /etc/systemd/system/ && sudo systemctl enable --now usbipd
+[Unit]
+Description=USB/IP Server (Autocom CDP+ Headless)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+ExecStartPre=/sbin/modprobe usbip-core
+ExecStartPre=/sbin/modprobe usbip-host
+ExecStart=/usr/sbin/usbipd -D
+ExecStartPost=/bin/bash -c 'sleep 2 && BID=$(usbip list -l 2>/dev/null | grep "0403:d6da" | grep -oP "(?<=busid )\\S+" | head -1) && [ -n "$BID" ] && usbip bind --busid "$BID" && echo "[usbip] Gerät $BID gebunden" || echo "[usbip] Gerät nicht gefunden"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

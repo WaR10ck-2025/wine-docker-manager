@@ -6,6 +6,7 @@ Verwaltet Software-Installationen im Wine-Container über docker exec.
 import asyncio
 import json
 import os
+import socket
 import subprocess
 from pathlib import Path
 from typing import AsyncGenerator
@@ -252,6 +253,8 @@ async def winetricks_install(component: str):
 
 USBIP_CONTAINER = os.getenv("USBIP_CONTAINER", "wine-usbip-server")
 WINDOWS_VM_CONTAINER = os.getenv("WINDOWS_VM_CONTAINER", "wine-windows-vm")
+# IP-Adresse des headless Mini-PCs mit USB/IP Server (leer = nicht konfiguriert)
+USBIP_REMOTE_HOST = os.getenv("USBIP_REMOTE_HOST", "")
 
 
 def _container_running(name: str) -> bool:
@@ -304,6 +307,20 @@ async def usbip_stop():
     )
     out, _ = await proc.communicate()
     return {"stopped": proc.returncode == 0}
+
+
+@app.get("/usbip/remote/status")
+def usbip_remote_status():
+    """Prüft ob der Mini-PC USB/IP-Server (Port 3240) erreichbar ist."""
+    if not USBIP_REMOTE_HOST:
+        return {"configured": False, "reachable": False, "host": ""}
+    try:
+        s = socket.create_connection((USBIP_REMOTE_HOST, 3240), timeout=3)
+        s.close()
+        reachable = True
+    except Exception:
+        reachable = False
+    return {"configured": True, "reachable": reachable, "host": USBIP_REMOTE_HOST}
 
 
 # ── Windows VM ──────────────────────────────────────────────────────────────

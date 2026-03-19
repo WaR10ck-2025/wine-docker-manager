@@ -30,6 +30,12 @@ export interface ProcessStatus {
   log_lines: number
 }
 
+export interface UsbIpRemoteStatus {
+  configured: boolean
+  reachable: boolean
+  host: string
+}
+
 // ── Uploads ────────────────────────────────────────────────────────────────
 
 export async function listUploads(): Promise<UploadedFile[]> {
@@ -121,6 +127,12 @@ export async function launchApp(exePath: string): Promise<{ pid: number }> {
 
 export async function winetricksPresets(): Promise<{ presets: string[] }> {
   const r = await fetch(`${BASE}/winetricks/presets`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function usbIpRemoteStatus(): Promise<UsbIpRemoteStatus> {
+  const r = await fetch(`${BASE}/usbip/remote/status`)
   if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
