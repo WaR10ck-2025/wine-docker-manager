@@ -209,14 +209,27 @@ export default function UsbIpPage() {
                 !remoteStatus?.configured ? 'bg-gray-600' :
                 remoteStatus.reachable ? 'bg-green-500' : 'bg-red-500'
               }`} />
-              <div>
-                <p className="text-sm text-gray-300">
-                  {!remoteStatus?.configured
-                    ? 'Nicht konfiguriert'
-                    : remoteStatus.reachable
-                      ? `Mini-PC erreichbar: ${remoteStatus.host}`
-                      : `Mini-PC nicht erreichbar: ${remoteStatus.host}`}
-                </p>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm text-gray-300">
+                    {!remoteStatus?.configured
+                      ? 'Nicht konfiguriert'
+                      : remoteStatus.reachable
+                        ? `Mini-PC erreichbar: ${remoteStatus.host}`
+                        : `Mini-PC nicht erreichbar: ${remoteStatus.host}`}
+                  </p>
+                  {remoteStatus?.reachable && remoteStatus.connection_type && (
+                    <span className={`text-xs px-2 py-0.5 rounded font-mono ${
+                      remoteStatus.connection_type === 'wifi'     ? 'bg-blue-900 text-blue-300' :
+                      remoteStatus.connection_type === 'ethernet' ? 'bg-green-900 text-green-300' :
+                      'bg-purple-900 text-purple-300'
+                    }`}>
+                      {remoteStatus.connection_type === 'wifi'     ? '📡 WiFi' :
+                       remoteStatus.connection_type === 'ethernet' ? '🔌 Ethernet' :
+                       '📡🔌 WiFi + Ethernet'}
+                    </span>
+                  )}
+                </div>
                 {!remoteStatus?.configured && (
                   <p className="text-xs text-gray-600 mt-0.5">
                     USBIP_REMOTE_HOST in docker-compose.yml setzen, dann Container neu starten.

@@ -258,6 +258,7 @@ USBIP_CONTAINER = os.getenv("USBIP_CONTAINER", "wine-usbip-server")
 WINDOWS_VM_CONTAINER = os.getenv("WINDOWS_VM_CONTAINER", "wine-windows-vm")
 # IP-Adresse des headless Mini-PCs mit USB/IP Server (leer = nicht konfiguriert)
 USBIP_REMOTE_HOST = os.getenv("USBIP_REMOTE_HOST", "")
+NANOPI_ETH_HOST = os.getenv("NANOPI_ETH_HOST", "")   # Ethernet-IP des Mini-PCs (optional)
 # OBD2 Monitor Service auf dem Mini-PC (Port 8765)
 OBD_MONITOR_HOST = os.getenv("OBD_MONITOR_HOST", "")
 OBD_MONITOR_PORT = int(os.getenv("OBD_MONITOR_PORT", "8765"))
@@ -315,18 +316,33 @@ async def usbip_stop():
     return {"stopped": proc.returncode == 0}
 
 
+def _host_reachable(host: str, port: int = 22, timeout: float = 2.0) -> bool:
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
 @app.get("/usbip/remote/status")
 def usbip_remote_status():
     """Prüft ob der Mini-PC USB/IP-Server (Port 3240) erreichbar ist."""
     if not USBIP_REMOTE_HOST:
-        return {"configured": False, "reachable": False, "host": ""}
-    try:
-        s = socket.create_connection((USBIP_REMOTE_HOST, 3240), timeout=3)
-        s.close()
-        reachable = True
-    except Exception:
-        reachable = False
-    return {"configured": True, "reachable": reachable, "host": USBIP_REMOTE_HOST}
+        return {"configured": False, "reachable": False, "host": "", "connection_type": None}
+    reachable = _host_reachable(USBIP_REMOTE_HOST, 3240)
+    # Verbindungstyp ermitteln: Ethernet (Port 22) und/oder WiFi
+    eth_up = bool(NANOPI_ETH_HOST) and _host_reachable(NANOPI_ETH_HOST, 22)
+    wifi_up = _host_reachable(USBIP_REMOTE_HOST, 22)
+    if eth_up and wifi_up:
+        connection_type = "both"
+    elif eth_up:
+        connection_type = "ethernet"
+    elif wifi_up:
+        connection_type = "wifi"
+    else:
+        connection_type = None
+    return {"configured": True, "reachable": reachable, "host": USBIP_REMOTE_HOST, "connection_type": connection_type}
 
 
 # ── OBD2 Monitor (Proxy → Mini-PC Port 8765) ────────────────────────────────

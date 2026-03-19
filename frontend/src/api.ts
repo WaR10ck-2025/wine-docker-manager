@@ -34,6 +34,7 @@ export interface UsbIpRemoteStatus {
   configured: boolean
   reachable: boolean
   host: string
+  connection_type: 'wifi' | 'ethernet' | 'both' | null
 }
 
 // ── OBD2 ───────────────────────────────────────────────────────────────────
