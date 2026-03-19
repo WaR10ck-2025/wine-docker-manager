@@ -19,11 +19,23 @@ AUTOCOM_PRODUCT="d6da"
 SERVICE_FILE="/etc/systemd/system/usbipd.service"
 UDEV_RULE="/etc/udev/rules.d/99-autocom-usbip.rules"
 
-# ── 1. USB/IP Pakete installieren ────────────────────────────────────────────
-echo "[1/5] Installiere usbip..."
+# ── 1. USB/IP Pakete + RTL8822CE WiFi-Firmware installieren ─────────────────
+echo "[1/5] Installiere usbip + Realtek WiFi-Firmware (RTL8822CE)..."
 apt-get update -qq
-apt-get install -y --no-install-recommends usbip kmod
+
+# firmware-realtek: enthält rtl8822c_fw.bin für den rtw88_8822ce Treiber
+# non-free-firmware Repo aktivieren (Debian Bookworm trennt Firmware in eigene Sektion)
+if ! grep -q "non-free-firmware" /etc/apt/sources.list 2>/dev/null; then
+    sed -i 's/bookworm main$/bookworm main non-free-firmware/' /etc/apt/sources.list 2>/dev/null || true
+    apt-get update -qq
+fi
+
+apt-get install -y --no-install-recommends usbip kmod firmware-realtek
 echo "      OK"
+
+# rtw88_8822ce Modul laden (WiFi-Treiber für RTL8822CE)
+modprobe rtw88_8822ce 2>/dev/null && echo "      rtw88_8822ce geladen ✓" || \
+    echo "      rtw88_8822ce: Modul nicht gefunden (Kernel-Version prüfen)"
 
 # usbip-Binaries finden
 USBIPD_BIN=$(which usbipd 2>/dev/null || echo "/usr/sbin/usbipd")
@@ -32,7 +44,7 @@ echo "      usbipd: $USBIPD_BIN"
 echo "      usbip:  $USBIP_BIN"
 
 # ── 2. Kernel-Module ─────────────────────────────────────────────────────────
-echo "[2/5] Lade Kernel-Module..."
+echo "[2/6] Lade Kernel-Module..."
 modprobe usbip-core 2>/dev/null || echo "      WARNUNG: usbip-core nicht geladen"
 modprobe usbip-host 2>/dev/null || echo "      WARNUNG: usbip-host nicht geladen"
 
@@ -41,7 +53,7 @@ grep -q "usbip-host" /etc/modules 2>/dev/null || echo "usbip-host" >> /etc/modul
 echo "      Module für Boot persistiert"
 
 # ── 3. Systemd Service ───────────────────────────────────────────────────────
-echo "[3/5] Erstelle systemd Service..."
+echo "[3/6] Erstelle systemd Service..."
 cat > "$SERVICE_FILE" << UNIT
 [Unit]
 Description=USB/IP Server (Autocom CDP+ Headless)
@@ -66,7 +78,7 @@ systemctl enable usbipd.service
 echo "      Service aktiviert"
 
 # ── 4. udev-Regel ────────────────────────────────────────────────────────────
-echo "[4/5] Installiere udev-Regel..."
+echo "[4/6] Installiere udev-Regel..."
 cat > "$UDEV_RULE" << UDEV
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="${AUTOCOM_VENDOR}", ATTR{idProduct}=="${AUTOCOM_PRODUCT}", RUN+="/bin/systemctl restart usbipd.service"
 UDEV
@@ -74,8 +86,17 @@ udevadm control --reload-rules
 echo "      udev-Regel installiert"
 
 # ── 5. Service starten ───────────────────────────────────────────────────────
-echo "[5/5] Starte USB/IP Server..."
+echo "[5/6] Starte USB/IP Server..."
 systemctl start usbipd.service || echo "      WARNUNG: Start fehlgeschlagen (Gerät nicht eingesteckt?)"
+
+# ── 6. WiFi-Status prüfen ────────────────────────────────────────────────────
+echo "[6/6] WiFi-Status (RTL8822CE)..."
+if ip link show | grep -q wlan; then
+    echo "      WLAN-Interface gefunden ✓"
+    ip link show | grep wlan | awk '{print "      "$2}' || true
+else
+    echo "      WARNUNG: Kein WLAN-Interface — Modul eingesteckt? (M.2 Key-E)"
+fi
 
 # ── Abschluss ────────────────────────────────────────────────────────────────
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
