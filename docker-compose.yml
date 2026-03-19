@@ -5,8 +5,11 @@ version: '3.8'
 #
 #  :3000  → React UI (App-Manager)
 #  :4000  → FastAPI Backend
-#  :5900  → VNC direkt (TigerVNC o.ä.)
-#  :8080  → noVNC Desktop (Browser)
+#  :5900  → VNC direkt (Wine Desktop)
+#  :8090  → noVNC Wine Desktop (Browser)
+#  :3240  → USB/IP Server (Autocom CDP+ → Windows-PC)
+#  :8100  → Windows VM noVNC (Browser)
+#  :3389  → Windows VM RDP
 # ────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -70,10 +73,61 @@ services:
     networks:
       - wine-net
 
+  # ── USB/IP Server ─────────────────────────────────────────────────────────
+  # Teilt den Autocom CDP+ USB-Adapter über das Netzwerk an einen Windows-PC.
+  # Windows-PC installiert: https://github.com/dorssel/usbipd-win
+  # Dann: usbipd attach --remote <umbrel-ip> --busid 3-6
+  usbip-server:
+    build:
+      context: ./usbip
+    container_name: wine-usbip-server
+    privileged: true               # Benötigt für modprobe usbip-core/usbip-host
+    network_mode: host             # usbipd muss auf Host-IP Port 3240 lauschen
+    environment:
+      USBIP_BUSID: "3-6"           # Bus-ID des Autocom CDP+ (lsusb -t auf Umbrel)
+    volumes:
+      - /lib/modules:/lib/modules:ro   # Host-Kernel-Module für modprobe
+      - /dev/bus/usb:/dev/bus/usb
+    restart: unless-stopped
+    profiles:
+      - usbip                      # Nur mit: docker compose --profile usbip up
+
+  # ── Windows VM (QEMU/KVM) ──────────────────────────────────────────────────
+  # Vollständige Windows-VM mit KVM-Beschleunigung + noVNC Browser-Zugriff.
+  # Beim ersten Start: Windows ISO wird heruntergeladen (~5 GB) oder manuell
+  # unter ./windows-vm/windows.iso ablegen und VERSION=custom setzen.
+  windows-vm:
+    image: dockurr/windows
+    container_name: wine-windows-vm
+    environment:
+      VERSION: "win10"             # win10, win11, win7, oder "custom" für eigene ISO
+      RAM_SIZE: "3G"
+      CPU_CORES: "2"
+      DISK_SIZE: "64G"
+      # USB-Passthrough: Autocom CDP+ direkt an die VM (FTDI 0403:d6da)
+      ARGUMENTS: "-usb -device usb-host,vendorid=0x0403,productid=0xd6da"
+    devices:
+      - /dev/kvm:/dev/kvm          # KVM-Hardware-Beschleunigung
+    device_cgroup_rules:
+      - 'c 189:* rwm'             # USB-Geräte-Zugriff
+    volumes:
+      - windows-disk:/storage      # VM-Disk (64 GB, auf /var/lib/docker)
+      - /dev/bus/usb:/dev/bus/usb
+    ports:
+      - "8100:8006"               # noVNC Browser-Zugriff (http://umbrel:8100)
+      - "3389:3389"               # RDP-Zugriff
+    restart: unless-stopped
+    stop_grace_period: 2m         # Windows braucht Zeit zum Herunterfahren
+    networks:
+      - wine-net
+    profiles:
+      - windows-vm                 # Nur mit: docker compose --profile windows-vm up
+
 # ── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
   wine-prefix:    # Persistenter Wine-Zustand (Registry, installierte Apps)
   uploads:        # Hochgeladene Installer-Dateien
+  windows-disk:   # Windows VM Disk-Image (64 GB)
 
 # ── Netzwerk ─────────────────────────────────────────────────────────────────
 networks:

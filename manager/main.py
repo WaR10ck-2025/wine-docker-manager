@@ -248,6 +248,96 @@ async def winetricks_install(component: str):
     return {"pid": pid, "component": component}
 
 
+# ── USB/IP ──────────────────────────────────────────────────────────────────
+
+USBIP_CONTAINER = os.getenv("USBIP_CONTAINER", "wine-usbip-server")
+WINDOWS_VM_CONTAINER = os.getenv("WINDOWS_VM_CONTAINER", "wine-windows-vm")
+
+
+def _container_running(name: str) -> bool:
+    """Prüft ob ein Docker-Container läuft."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", name],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
+@app.get("/usbip/status")
+def usbip_status():
+    """Status des USB/IP-Servers und gebundener Geräte."""
+    running = _container_running(USBIP_CONTAINER)
+    devices = []
+    if running:
+        try:
+            result = subprocess.run(
+                ["docker", "exec", USBIP_CONTAINER, "usbip", "list", "--exported"],
+                capture_output=True, text=True, timeout=5
+            )
+            devices = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+        except Exception:
+            pass
+    return {"running": running, "container": USBIP_CONTAINER, "devices": devices}
+
+
+@app.post("/usbip/start")
+async def usbip_start():
+    """Startet den USB/IP-Server-Container."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "compose", "--profile", "usbip", "up", "-d", "usbip-server",
+        cwd="/app",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    return {"started": proc.returncode == 0, "output": out.decode(errors="replace")}
+
+
+@app.post("/usbip/stop")
+async def usbip_stop():
+    """Stoppt den USB/IP-Server-Container."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "stop", USBIP_CONTAINER,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    return {"stopped": proc.returncode == 0}
+
+
+# ── Windows VM ──────────────────────────────────────────────────────────────
+
+@app.get("/windowsvm/status")
+def windowsvm_status():
+    """Status der Windows-VM."""
+    running = _container_running(WINDOWS_VM_CONTAINER)
+    return {"running": running, "container": WINDOWS_VM_CONTAINER}
+
+
+@app.post("/windowsvm/start")
+async def windowsvm_start():
+    """Startet die Windows-VM."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "compose", "--profile", "windows-vm", "up", "-d", "windows-vm",
+        cwd="/app",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    return {"started": proc.returncode == 0, "output": out.decode(errors="replace")}
+
+
+@app.post("/windowsvm/stop")
+async def windowsvm_stop():
+    """Fährt die Windows-VM herunter (graceful shutdown)."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "stop", "--time", "120", WINDOWS_VM_CONTAINER,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    return {"stopped": proc.returncode == 0}
+
+
 # ── Gesundheitsprüfung ──────────────────────────────────────────────────────
 
 @app.get("/health")

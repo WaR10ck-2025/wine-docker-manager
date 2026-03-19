@@ -3,7 +3,7 @@
  * Alle Pfade werden relativ zu /api geroutet (via Nginx-Proxy in Produktion).
  */
 
-const BASE = '/api'
+export const BASE = '/api'
 
 export interface UploadedFile {
   filename: string

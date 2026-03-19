@@ -3,12 +3,16 @@ import InstallPage from './pages/InstallPage'
 import AppsPage from './pages/AppsPage'
 import DesktopPage from './pages/DesktopPage'
 import WinetricksPage from './pages/WinetricksPage'
+import UsbIpPage from './pages/UsbIpPage'
+import WindowsVmPage from './pages/WindowsVmPage'
 
 const NAV = [
-  { to: '/',           label: '🖥  Desktop'     },
-  { to: '/install',    label: '📦  Installieren' },
-  { to: '/apps',       label: '▶  Apps'          },
-  { to: '/winetricks', label: '🔧  Winetricks'   },
+  { to: '/',           label: '🖥  Wine Desktop'  },
+  { to: '/install',    label: '📦  Installieren'  },
+  { to: '/apps',       label: '▶  Apps'           },
+  { to: '/winetricks', label: '🔧  Winetricks'    },
+  { to: '/usbip',      label: '🔌  USB/IP'        },
+  { to: '/windowsvm',  label: '🪟  Windows VM'    },
 ]
 
 export default function App() {
@@ -17,7 +21,7 @@ export default function App() {
       {/* Header */}
       <header className="border-b border-gray-800 px-6 py-3 flex items-center gap-6">
         <span className="text-wine-500 font-bold text-lg tracking-widest">WINE MANAGER</span>
-        <nav className="flex gap-1 ml-4">
+        <nav className="flex gap-1 ml-4 flex-wrap">
           {NAV.map(({ to, label }) => (
             <NavLink
               key={to}
@@ -44,6 +48,8 @@ export default function App() {
           <Route path="/install"    element={<InstallPage />} />
           <Route path="/apps"       element={<AppsPage />} />
           <Route path="/winetricks" element={<WinetricksPage />} />
+          <Route path="/usbip"      element={<UsbIpPage />} />
+          <Route path="/windowsvm"  element={<WindowsVmPage />} />
         </Routes>
       </main>
     </div>
