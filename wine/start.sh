@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+# ── Als root: Volume-Ownership korrigieren, dann zu wineuser wechseln ────────
+if [ "$(id -u)" = "0" ]; then
+    echo "[Wine-Desktop] Korrigiere Volume-Ownership für wineuser..."
+    chown -R wineuser:wineuser /home/wineuser /uploads /app 2>/dev/null || true
+    echo "[Wine-Desktop] Wechsle zu wineuser..."
+    exec su -s /bin/bash wineuser -c "exec /start.sh"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 echo "[Wine-Desktop] Starte virtuellen Display..."
 Xvfb :99 -screen 0 1280x800x24 -ac &
 XVFB_PID=$!

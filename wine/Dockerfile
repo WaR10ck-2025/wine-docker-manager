@@ -28,7 +28,8 @@ RUN mkdir -p /uploads /app && chown -R wineuser:wineuser /uploads /app
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-USER wineuser
+# Als root starten — start.sh korrigiert Volume-Ownership und wechselt zu wineuser
+USER root
 
 # Wine-Umgebung konfigurieren
 ENV WINEARCH=win64
