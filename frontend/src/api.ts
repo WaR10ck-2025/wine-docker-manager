@@ -197,6 +197,83 @@ export function obdStream(onData: (d: ObdData) => void): () => void {
   return () => es.close()
 }
 
+// ── Fahrzeuge ───────────────────────────────────────────────────────────────
+
+export interface DtcSession {
+  date: string
+  codes: { code: string; description: string }[]
+  odometer?: number | null
+  notes: string
+}
+
+export interface Vehicle {
+  id: string
+  name: string
+  make: string
+  model: string
+  year: number
+  engine: string
+  obd_protocol: 'auto' | 'iso9141' | 'elm327'
+  vin: string
+  notes: string
+  dtc_history: DtcSession[]
+  created_at: string
+}
+
+export type VehicleInput = Omit<Vehicle, 'id' | 'dtc_history' | 'created_at'>
+
+export async function listVehicles(): Promise<Vehicle[]> {
+  const r = await fetch(`${BASE}/vehicles`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function createVehicle(data: VehicleInput): Promise<Vehicle> {
+  const r = await fetch(`${BASE}/vehicles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function updateVehicle(id: string, data: Partial<VehicleInput>): Promise<Vehicle> {
+  const r = await fetch(`${BASE}/vehicles/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function deleteVehicle(id: string): Promise<void> {
+  const r = await fetch(`${BASE}/vehicles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(await r.text())
+}
+
+export async function saveDtcSession(
+  vehicleId: string,
+  data: { codes: DtcSession['codes']; odometer?: number; notes?: string },
+): Promise<DtcSession> {
+  const r = await fetch(`${BASE}/vehicles/${encodeURIComponent(vehicleId)}/dtc-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
+export async function deleteDtcSession(vehicleId: string, sessionIndex: number): Promise<void> {
+  const r = await fetch(
+    `${BASE}/vehicles/${encodeURIComponent(vehicleId)}/dtc-session/${sessionIndex}`,
+    { method: 'DELETE' },
+  )
+  if (!r.ok) throw new Error(await r.text())
+}
+
 export async function winetricksInstall(component: string): Promise<InstallResult> {
   const params = new URLSearchParams({ component })
   const r = await fetch(`${BASE}/winetricks/install?${params}`, { method: 'POST' })

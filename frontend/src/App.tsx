@@ -5,6 +5,7 @@ import DesktopPage from './pages/DesktopPage'
 import WinetricksPage from './pages/WinetricksPage'
 import UsbIpPage from './pages/UsbIpPage'
 import WindowsVmPage from './pages/WindowsVmPage'
+import VehiclesPage from './pages/VehiclesPage'
 
 const NAV = [
   { to: '/',           label: '🖥  Wine Desktop'  },
@@ -13,6 +14,7 @@ const NAV = [
   { to: '/winetricks', label: '🔧  Winetricks'    },
   { to: '/usbip',      label: '🔌  USB/IP'        },
   { to: '/windowsvm',  label: '🪟  Windows VM'    },
+  { to: '/vehicles',   label: '🚗  Fahrzeuge'     },
 ]
 
 export default function App() {
@@ -50,6 +52,7 @@ export default function App() {
           <Route path="/winetricks" element={<WinetricksPage />} />
           <Route path="/usbip"      element={<UsbIpPage />} />
           <Route path="/windowsvm"  element={<WindowsVmPage />} />
+          <Route path="/vehicles"   element={<VehiclesPage />} />
         </Routes>
       </main>
     </div>

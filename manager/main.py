@@ -8,6 +8,8 @@ import json
 import os
 import socket
 import subprocess
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -425,6 +427,116 @@ async def windowsvm_stop():
     )
     out, _ = await proc.communicate()
     return {"stopped": proc.returncode == 0}
+
+
+# ── Fahrzeuge (Vehicle Management) ──────────────────────────────────────────
+
+VEHICLES_FILE = UPLOAD_DIR / "vehicles.json"
+
+
+def _load_vehicles() -> list[dict]:
+    """Lädt Fahrzeugliste aus vehicles.json."""
+    if not VEHICLES_FILE.exists():
+        return []
+    try:
+        return json.loads(VEHICLES_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_vehicles(vehicles: list[dict]) -> None:
+    VEHICLES_FILE.write_text(json.dumps(vehicles, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+@app.get("/vehicles")
+def list_vehicles():
+    """Listet alle gespeicherten Fahrzeuge."""
+    return _load_vehicles()
+
+
+@app.post("/vehicles")
+def create_vehicle(data: dict):
+    """Erstellt ein neues Fahrzeug."""
+    vehicles = _load_vehicles()
+    vehicle = {
+        "id": str(uuid.uuid4()),
+        "name": data.get("name", ""),
+        "make": data.get("make", ""),
+        "model": data.get("model", ""),
+        "year": data.get("year", 0),
+        "engine": data.get("engine", ""),
+        "obd_protocol": data.get("obd_protocol", "auto"),
+        "vin": data.get("vin", ""),
+        "notes": data.get("notes", ""),
+        "dtc_history": [],
+        "created_at": datetime.now().isoformat(),
+    }
+    vehicles.append(vehicle)
+    _save_vehicles(vehicles)
+    return vehicle
+
+
+@app.put("/vehicles/{vehicle_id}")
+def update_vehicle(vehicle_id: str, data: dict):
+    """Aktualisiert ein bestehendes Fahrzeug."""
+    vehicles = _load_vehicles()
+    for i, v in enumerate(vehicles):
+        if v["id"] == vehicle_id:
+            for key in ["name", "make", "model", "year", "engine", "obd_protocol", "vin", "notes"]:
+                if key in data:
+                    v[key] = data[key]
+            vehicles[i] = v
+            _save_vehicles(vehicles)
+            return v
+    raise HTTPException(404, "Fahrzeug nicht gefunden")
+
+
+@app.delete("/vehicles/{vehicle_id}")
+def delete_vehicle(vehicle_id: str):
+    """Löscht ein Fahrzeug inkl. DTC-Historie."""
+    vehicles = _load_vehicles()
+    before = len(vehicles)
+    vehicles = [v for v in vehicles if v["id"] != vehicle_id]
+    if len(vehicles) == before:
+        raise HTTPException(404, "Fahrzeug nicht gefunden")
+    _save_vehicles(vehicles)
+    return {"deleted": vehicle_id}
+
+
+@app.post("/vehicles/{vehicle_id}/dtc-session")
+def save_dtc_session(vehicle_id: str, data: dict):
+    """Speichert eine DTC-Diagnosesitzung bei einem Fahrzeug."""
+    vehicles = _load_vehicles()
+    for i, v in enumerate(vehicles):
+        if v["id"] == vehicle_id:
+            session = {
+                "date": datetime.now().isoformat(),
+                "codes": data.get("codes", []),
+                "odometer": data.get("odometer"),
+                "notes": data.get("notes", ""),
+            }
+            v.setdefault("dtc_history", []).append(session)
+            vehicles[i] = v
+            _save_vehicles(vehicles)
+            return session
+    raise HTTPException(404, "Fahrzeug nicht gefunden")
+
+
+@app.delete("/vehicles/{vehicle_id}/dtc-session/{session_index}")
+def delete_dtc_session(vehicle_id: str, session_index: int):
+    """Löscht eine einzelne DTC-Sitzung."""
+    vehicles = _load_vehicles()
+    for i, v in enumerate(vehicles):
+        if v["id"] == vehicle_id:
+            history = v.get("dtc_history", [])
+            if session_index < 0 or session_index >= len(history):
+                raise HTTPException(404, "Sitzung nicht gefunden")
+            history.pop(session_index)
+            v["dtc_history"] = history
+            vehicles[i] = v
+            _save_vehicles(vehicles)
+            return {"deleted": session_index}
+    raise HTTPException(404, "Fahrzeug nicht gefunden")
 
 
 # ── Gesundheitsprüfung ──────────────────────────────────────────────────────
