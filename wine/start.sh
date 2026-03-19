@@ -8,6 +8,9 @@ trap '' ERR
 if [ "$(id -u)" = "0" ]; then
     echo "[Wine-Desktop] Korrigiere Volume-Ownership für wineuser..."
     chown -R wineuser:wineuser /home/wineuser /uploads /app 2>/dev/null || true
+    # noVNC index.html als root schreiben (kein Schreibrecht für wineuser)
+    echo '<meta http-equiv="refresh" content="0;url=vnc_auto.html">' \
+        > /usr/share/novnc/index.html
     echo "[Wine-Desktop] Wechsle zu wineuser..."
     exec su - wineuser -s /bin/bash -c "exec /start.sh"
 fi
@@ -28,9 +31,6 @@ x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet -noxauth &
 sleep 1
 
 echo "[Wine-Desktop] Starte noVNC auf Port 8080..."
-# index.html → automatisch zu vnc_auto.html weiterleiten
-echo '<meta http-equiv="refresh" content="0;url=vnc_auto.html">' \
-    > /usr/share/novnc/index.html
 websockify --web /usr/share/novnc/ 8080 localhost:5900 &
 
 # COM-Port-Symlinks automatisch setzen
