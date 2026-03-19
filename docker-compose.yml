@@ -1,0 +1,85 @@
+version: '3.8'
+
+# ────────────────────────────────────────────────────────────────────────────
+# Wine Manager — Docker Compose
+#
+#  :3000  → React UI (App-Manager)
+#  :4000  → FastAPI Backend
+#  :5900  → VNC direkt (TigerVNC o.ä.)
+#  :8080  → noVNC Desktop (Browser)
+# ────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Wine Desktop ──────────────────────────────────────────────────────────
+  wine-desktop:
+    build:
+      context: ./wine
+    container_name: wine-desktop
+    environment:
+      WINEARCH: win64
+      WINEPREFIX: /home/wineuser/.wine
+      DISPLAY: ":99"
+      WINEDEBUG: "-all"
+    volumes:
+      - wine-prefix:/home/wineuser/.wine
+      - uploads:/uploads
+    ports:
+      - "5900:5900"   # VNC direkt
+      - "8080:8080"   # noVNC Browser
+    # USB-Durchreiche (auskommentiert — nach Bedarf aktivieren):
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    #   - /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_XXXXXXXX:/dev/ttyUSB0
+    # device_cgroup_rules:
+    #   - 'c 189:* rwm'   # Alle USB-Geräte (Hotplug)
+    #   - 'c 13:* rwm'    # hidraw/input Geräte
+    # volumes (zusätzlich für USB-Bus):
+    #   - /dev/bus/usb:/dev/bus/usb
+    restart: unless-stopped
+    networks:
+      - wine-net
+
+  # ── Manager Backend ───────────────────────────────────────────────────────
+  manager-api:
+    build:
+      context: ./manager
+    container_name: wine-manager-api
+    environment:
+      WINE_CONTAINER: wine-desktop
+      UPLOAD_DIR: /uploads
+      WINEPREFIX: /wine-prefix/.wine
+    volumes:
+      - uploads:/uploads
+      - wine-prefix:/wine-prefix
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "4000:4000"
+    depends_on:
+      - wine-desktop
+    restart: unless-stopped
+    networks:
+      - wine-net
+
+  # ── React UI ──────────────────────────────────────────────────────────────
+  manager-ui:
+    build:
+      context: ./frontend
+    container_name: wine-manager-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - manager-api
+    restart: unless-stopped
+    networks:
+      - wine-net
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  wine-prefix:    # Persistenter Wine-Zustand (Registry, installierte Apps)
+  uploads:        # Hochgeladene Installer-Dateien
+
+# ── Netzwerk ─────────────────────────────────────────────────────────────────
+networks:
+  wine-net:
+    driver: bridge
