@@ -4,7 +4,7 @@
  */
 export default function DesktopPage() {
   // Im Browser: wine-desktop ist über den Docker-internen Proxy erreichbar
-  const novncUrl = `http://${window.location.hostname}:8080/vnc.html?autoconnect=true&resize=scale`
+  const novncUrl = `http://${window.location.hostname}:8090/vnc_auto.html?resize=scale`
 
   return (
     <div className="flex flex-col gap-3 h-[calc(100vh-8rem)]">

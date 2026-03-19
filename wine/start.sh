@@ -24,6 +24,9 @@ x11vnc -display :99 -forever -nopw -rfbport 5900 -quiet &
 sleep 1
 
 echo "[Wine-Desktop] Starte noVNC auf Port 8080..."
+# index.html → automatisch zu vnc_auto.html weiterleiten
+echo '<meta http-equiv="refresh" content="0;url=vnc_auto.html">' \
+    > /usr/share/novnc/index.html
 websockify --web /usr/share/novnc/ 8080 localhost:5900 &
 
 # COM-Port-Symlinks automatisch setzen
