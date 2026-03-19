@@ -1,0 +1,48 @@
+##### DietPi Pre-Configuration — NanoPi R5C (Autocom USB/IP Headless Server) #####
+#
+# Auf die FAT32 Boot-Partition des geflashten MicroSD-Sticks kopieren.
+# DietPi liest sie beim ersten Boot und konfiguriert alles automatisch.
+#
+# NanoPi R5C: https://dietpi.com/downloads/images/DietPi_NanoPiR5C-ARMv8-Bookworm.img.xz
+#
+# Kein Monitor, keine Tastatur, kein WiFi nötig — Ethernet direkt anschließen.
+#
+# Nach dem Flashen:
+#   1. dietpi.txt + Automation_Custom_Script.sh auf Boot-Partition kopieren
+#   2. MicroSD in NanoPi R5C + Ethernet + Strom
+#   3. ~10 Min warten → SSH: ssh root@autocom-usbip (Passwort: autocom)
+#
+####################################################################################
+
+# ── Sprache & Region ──────────────────────────────────────────────
+AUTO_SETUP_LOCALE=de_DE.UTF-8
+AUTO_SETUP_KEYBOARD_LAYOUT=de
+AUTO_SETUP_TIMEZONE=Europe/Berlin
+
+# ── Netzwerk — nur Ethernet (NanoPi R5C hat kein internes WiFi) ───
+AUTO_SETUP_NET_ETHERNET_ENABLED=1
+AUTO_SETUP_NET_WIFI_ENABLED=0
+
+# Statische IP (optional — leer lassen für DHCP)
+#AUTO_SETUP_NET_STATIC_IP=192.168.10.201
+#AUTO_SETUP_NET_STATIC_MASK=255.255.255.0
+#AUTO_SETUP_NET_STATIC_GATEWAY=192.168.10.1
+#AUTO_SETUP_NET_STATIC_DNS=192.168.10.1
+
+# ── SSH Server ────────────────────────────────────────────────────
+AUTO_SETUP_SSH_SERVER_INDEX=-2
+
+# ── Passwort ──────────────────────────────────────────────────────
+AUTO_SETUP_GLOBAL_PASSWORD=autocom
+
+# ── Headless + vollautomatisch ────────────────────────────────────
+AUTO_SETUP_HEADLESS=1
+AUTO_SETUP_AUTOMATED=1
+
+# ── Automation-Skript (installiert USB/IP Server) ─────────────────
+AUTO_SETUP_CUSTOM_SCRIPT_EXEC=1
+
+# ── Telemetrie deaktivieren ───────────────────────────────────────
+SURVEY_OPTED_IN=0
+
+AUTO_SETUP_INSTALL_SOFTWARE_ID=
