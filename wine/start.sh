@@ -8,6 +8,8 @@ trap '' ERR
 if [ "$(id -u)" = "0" ]; then
     echo "[Wine-Desktop] Korrigiere Volume-Ownership für wineuser..."
     chown -R wineuser:wineuser /home/wineuser /uploads /app 2>/dev/null || true
+    # USB-Geräte für wineuser (libusb) zugänglich machen
+    chmod -R 666 /dev/bus/usb 2>/dev/null || true
     # noVNC index.html als root schreiben (kein Schreibrecht für wineuser)
     echo '<meta http-equiv="refresh" content="0;url=vnc_auto.html">' \
         > /usr/share/novnc/index.html
