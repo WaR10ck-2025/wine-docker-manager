@@ -1,0 +1,44 @@
+########################################################
+# Armbian First-Run Pre-Configuration
+# NanoPi R5C — Autocom CDP+ USB/IP Headless Server
+#
+# Diese Datei auf die FAT32 Boot-Partition des geflashten
+# MicroSD-Sticks kopieren (neben armbianEnv.txt).
+#
+# Armbian liest sie beim ersten Boot und überspringt den
+# interaktiven Setup-Wizard → direkt SSH verfügbar.
+#
+# Nach dem Flashen:
+#   1. Datei auf Boot-Partition kopieren
+#   2. MicroSD in NanoPi R5C einlegen
+#   3. Ethernet-Kabel anschließen
+#   4. Strom an → IP aus Router-DHCP-Tabelle ablesen
+#   5. ssh root@<ip>   (Passwort: autocom)
+#   6. sudo bash install.sh
+########################################################
+
+# Benutzer & Passwort (root + erster User)
+FR_general_password=autocom
+FR_username=autocom
+
+# Hostname (erscheint als autocom-usbip im Netzwerk)
+FR_hostname=autocom-usbip
+
+# Locale & Zeitzone
+FR_locales=de_DE.UTF-8
+FR_timezone=Europe/Berlin
+
+# Netzwerk — Ethernet (kein WiFi, R5C verbindet via 2.5GbE)
+FR_net_change_defaults=1
+FR_net_ethernet_enabled=1
+FR_net_wifi_enabled=0
+
+# DHCP (statische IP optional unten aktivieren)
+FR_net_use_static=0
+#FR_net_static_ip=192.168.10.201
+#FR_net_static_mask=255.255.255.0
+#FR_net_static_gateway=192.168.10.1
+#FR_net_static_dns=192.168.10.1
+
+# SSH sofort aktivieren
+FR_ssh_enabled=1

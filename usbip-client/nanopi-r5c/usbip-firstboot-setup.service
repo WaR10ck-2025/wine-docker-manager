@@ -1,0 +1,26 @@
+# usbip-firstboot-setup.service
+# Systemd Oneshot — installiert USB/IP Server einmalig beim ersten Boot.
+#
+# Auf MicroSD Boot-Partition ablegen, dann nach erstem SSH-Login:
+#   sudo cp /boot/usbip-firstboot-setup.service /etc/systemd/system/
+#   sudo systemctl enable --now usbip-firstboot-setup.service
+#
+# Alternativ: direkt ausführen (einfacher nach erstem SSH-Login):
+#   curl -fsSL https://raw.githubusercontent.com/WaR10ck-2025/wine-docker-manager/main/usbip-client/install.sh | sudo bash
+
+[Unit]
+Description=USB/IP Server First-Boot Setup (Autocom CDP+)
+After=network-online.target
+Wants=network-online.target
+# Nur einmal ausführen (Marker-Datei verhindert Wiederholung)
+ConditionPathExists=!/etc/usbip-setup-done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/boot/usbip-firstboot.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
