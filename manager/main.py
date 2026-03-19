@@ -26,7 +26,10 @@ app.add_middleware(
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/uploads"))
 WINE_CONTAINER = os.getenv("WINE_CONTAINER", "wine-desktop")
-WINEPREFIX = os.getenv("WINEPREFIX", "/home/wineuser/.wine")
+# Pfad zum WINEPREFIX *innerhalb des wine-desktop Containers* (für docker exec)
+WINE_CONTAINER_PREFIX = os.getenv("WINE_CONTAINER_PREFIX", "/home/wineuser/.wine")
+# Pfad zum WINEPREFIX *im manager-api Container* (zum Lesen installierter Apps)
+LOCAL_WINEPREFIX = Path(os.getenv("LOCAL_WINEPREFIX", "/wine-prefix/.wine"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Laufende Prozesse: pid → asyncio.subprocess.Process
@@ -39,7 +42,7 @@ def _docker_exec(cmd: list[str]) -> list[str]:
     """Führt einen Befehl im Wine-Container als wineuser aus."""
     return [
         "docker", "exec", "-u", "wineuser",
-        "-e", f"WINEPREFIX={WINEPREFIX}",
+        "-e", f"WINEPREFIX={WINE_CONTAINER_PREFIX}",
         "-e", "DISPLAY=:99",
         "-e", "WINEDEBUG=-all",
         WINE_CONTAINER,
@@ -178,7 +181,7 @@ def list_apps():
     Listet installierte Apps aus dem WINEPREFIX.
     Liest Programme aus drive_c/Program Files und drive_c/Program Files (x86).
     """
-    prefix_path = Path("/wine-prefix/.wine")
+    prefix_path = LOCAL_WINEPREFIX
     apps = []
 
     for prog_dir in ["drive_c/Program Files", "drive_c/Program Files (x86)"]:
