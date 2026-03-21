@@ -46,7 +46,7 @@ export default function WifiAdapterPage() {
           )}
         </TabBtn>
         <TabBtn active={activeTab === 'vgate'} onClick={() => setActiveTab('vgate')}>
-          📶 Vgate iCar 2
+          📡 Vgate iCar 2
           {status && (
             <span className={`ml-2 w-1.5 h-1.5 rounded-full inline-block ${
               status.vgate.reachable ? 'bg-green-500' : 'bg-gray-600'
