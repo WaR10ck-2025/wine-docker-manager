@@ -1,18 +1,46 @@
 # USB/IP Client — GL.iNet OBD2 Setup
 
 Dieses Verzeichnis enthält alle Skripte und Konfigurationen für das
-**USB/IP-basierte OBD2-Diagnose-Setup** mit GL.iNet-Routern als USB/IP-Server.
+**OBD2-Diagnose-Setup** mit GL.iNet-Routern als zentralem Hub.
+
+Der Router übernimmt dabei eine **Doppelrolle**:
+- **Pfad A:** USB/IP-Server — exportiert USB-Adapter ins Netz
+- **Pfad B:** WiFi-Bridge — routet WiFi-native OBD2-Adapter ins LAN
+
+---
+
+## Gesamt-Architektur
 
 ```
-GL.iNet Router (USB/IP-Server)
-  └── USB: OBD2-Adapter eingesteckt
-  └── Port 3240: USB/IP → exportiert Adapter ins Netz
-  └── Port 8765: FastAPI OBD2-Service (Live-Daten, DTC)
+╔══════════════════════════════════════════════════════════════════╗
+║  Auto / OBD2-Port                                                ║
+║                                                                   ║
+║  ┌─────────────┐  USB   ┌──────────────────────────┐            ║
+║  │ CDP+ / GD101│ ──────▶│                          │  LAN        ║
+║  │ VIDA DiCE   │        │   GL.iNet Router          │ ─────────▶ Umbrel
+║  │ MVCI PRO+   │        │                          │  192.168.10.147
+║  └─────────────┘        │  ┌─────────────────────┐ │
+║                         │  │  usbipd (Pfad A)    │ │
+║  ┌─────────────┐  WiFi  │  │  WiFi AP (Pfad B)   │ │
+║  │  WiCAN Pro  │ ──────▶│  │  Bridge: WiFi → LAN │ │
+║  │  Vgate iCar2│        │  └─────────────────────┘ │
+║  │  Macchina   │        └──────────────────────────┘
+║  └─────────────┘
+╚══════════════════════════════════════════════════════════════════╝
 
-Umbrel-Server / Windows-PC (USB/IP-Client)
-  └── usbip attach → Adapter lokal verfügbar
-  └── [Linux]   python-obd / obd_service.py direkt
-  └── [Windows] VIDA 2014D / vdash / Hersteller-Software
+Umbrel-Server verbindet sich via:
+  Pfad A → usbip attach → /dev/ttyUSB0 → python-obd (serial) / VIDA
+  Pfad B → TCP direkt  → 192.168.10.200 → python-can / udsoncan / obd TCP
+```
+
+### Pfad A — USB/IP (USB-Adapter direkt am Router)
+```
+Auto → USB-Adapter → Router (USB-Host + usbipd) → LAN → Server
+```
+
+### Pfad B — WiFi-Bridge (WiFi-Adapter, kein Treiber auf Router)
+```
+Auto → WiFi-Adapter → Router (WiFi AP + Bridge) → LAN → Server
 ```
 
 ---
@@ -43,62 +71,60 @@ Umbrel-Server / Windows-PC (USB/IP-Client)
 
 ## Adapter-Tab
 
-| Verzeichnis | Adapter | Empfehlung |
-|---|---|---|
-| [adapters/](adapters/) | Alle 4 Adapter — Vergleich + Auswahl | → Vergleichsmatrix |
-| [adapters/autocom-cdp-plus/](adapters/autocom-cdp-plus/) | Autocom CDP+ (FTDI) | ✅ Standard OBD2 + Linux-nativ |
-| [adapters/volvo-vida-dice/](adapters/volvo-vida-dice/) | Volvo VIDA DiCE (SETEK) | Original, teuer, VM nötig |
-| [adapters/mvci-pro-plus/](adapters/mvci-pro-plus/) | Xhorse MVCI PRO+ (J2534) | VAG/Toyota gut, Volvo eingeschränkt |
-| [adapters/godiag-gd101/](adapters/godiag-gd101/) | GODIAG GD101 (FTDI J2534) | ★ **Empfohlen für Volvo Tiefdiagnose** |
-
-### Adapter-Kurzübersicht
-
-| Adapter | Linux-Treiber | python-OBD | Volvo Tiefdiagnose | Preis |
-|---|---|---|---|---|
-| Autocom CDP+ | ✅ `ftdi_sio` | ✅ direkt | ❌ nur OBD2 | ~€50–150 |
-| VIDA DiCE | ❌ VM-only | ❌ | ✅ Vollzugriff | ~€150–300 |
-| MVCI PRO+ | ❌ VM-only | ❌ | ⚠️ unzuverlässig | ~€80–120 |
-| GODIAG GD101 | ⚠️ FTDI (partial) | ❌ | ✅ VIDA/vdash | ~€30–60 |
+| Verzeichnis | Adapter | Pfad | Empfehlung |
+|---|---|---|---|
+| [adapters/](adapters/) | Alle Adapter — Vergleich + Auswahl | — | → Vergleichsmatrix |
+| [adapters/autocom-cdp-plus/](adapters/autocom-cdp-plus/) | Autocom CDP+ (FTDI) | A | ✅ Standard OBD2 + Linux |
+| [adapters/volvo-vida-dice/](adapters/volvo-vida-dice/) | Volvo VIDA DiCE (SETEK) | A | ⚠️ Original, teuer, VM |
+| [adapters/mvci-pro-plus/](adapters/mvci-pro-plus/) | Xhorse MVCI PRO+ (J2534) | A | ⚠️ VAG/Toyota |
+| [adapters/godiag-gd101/](adapters/godiag-gd101/) | GODIAG GD101 (FTDI J2534) | A | ★ Volvo Tiefdiagnose |
+| [adapters/wican-pro/](adapters/wican-pro/) | WiCAN Pro (ESP32-C3) | B | ★★ WiFi+J2534+Linux |
+| [adapters/vgate-icar2-wifi/](adapters/vgate-icar2-wifi/) | Vgate iCar 2 (ELM327) | B | ⚠️ Günstig, kein J2534 |
+| [adapters/macchina-m2/](adapters/macchina-m2/) | Macchina M2/A0 (Open HW) | B | ★ J2534+WiFi Open Source |
+| [adapters/topdon-rlink/](adapters/topdon-rlink/) | TOPDON RLink J2534/Lite/X7 | — | ❌ Nicht empfohlen |
 
 ---
 
 ## Quickstart
 
-### Bestehendes Setup (GL-BE3600 + CDP+)
+### Bestehendes Setup (GL-BE3600 + CDP+, Pfad A)
 
 ```bash
-# Auf Router deployen
 cd gl-inet-be3600/
 ./ssh-manager.sh setup
-
-# Status prüfen
-./ssh-manager.sh status
 curl http://192.168.10.194:8765/obd/status
 ```
 
-### Neues Gerät einrichten (GL-E5800 / GL-BE10000)
+### Neuer WiFi-Adapter (WiCAN Pro, Pfad B)
 
 ```bash
-# GL-E5800
-cd gl-inet-e5800/
-./ssh-manager.sh setup         # Interaktiv durch alle Phasen
+# 1. WiCAN Pro in Router-WiFi einbuchen
+#    → adapters/wican-pro/router-bridge-setup.md
 
-# GL-BE10000 (Prototype)
-cd gl-inet-be10000/
-./ssh-manager.sh setup
+# 2. DHCP-Reservation setzen
+ssh root@192.168.10.194 "
+uci add dhcp host
+uci set dhcp.@host[-1].mac='<WiCAN-MAC>'
+uci set dhcp.@host[-1].ip='192.168.10.200'
+uci commit dhcp && /etc/init.d/dnsmasq restart
+"
+
+# 3. Verbindung testen (Umbrel-Server)
+python3 -c "
+import can
+bus = can.Bus(interface='socketcand', channel='can0',
+              host='192.168.10.200', port=3333)
+print('WiCAN Pro OK:', bus.channel_info)
+bus.shutdown()
+"
 ```
 
-### Adapter wechseln (z.B. CDP+ → GODIAG GD101)
+### Adapter wechseln (Pfad A)
 
 ```bash
-# adapter.conf auf Router kopieren
+# Neue adapter.conf auf Router
 scp adapters/godiag-gd101/adapter.conf root@192.168.10.194:/etc/obd-adapter.conf
-
-# usbipd neu starten (liest neue Config)
-ssh root@192.168.10.194 "/etc/init.d/usbipd restart"
-
-# Status prüfen
-ssh root@192.168.10.194 "obd-ctl adapter"
+ssh root@192.168.10.194 "/etc/init.d/usbipd restart && obd-ctl adapter"
 ```
 
 ---
@@ -110,26 +136,22 @@ Heimnetz (192.168.10.0/24)
 │
 ├── Umbrel-Server     192.168.10.147   (USB/IP-Client + Docker OBD2-Frontend)
 │
-├── GL-BE3600 WiFi    192.168.10.194   (Slate 7     — vorhanden)
-├── GL-E5800  WiFi    192.168.10.195   (Mudi 7      — optional)
-└── GL-BE10000 WiFi   192.168.10.196   (Slate 7 Pro — Prototype)
-       │
-       └── USB: OBD2-Adapter (CDP+ / VIDA DiCE / GD101)
-             └── Port 3240: USB/IP exportiert Adapter
+├── GL-BE3600 WiFi    192.168.10.194   (Slate 7      — Router + USB/IP-Server)
+├── GL-E5800  WiFi    192.168.10.195   (Mudi 7       — Router + 5G + USB/IP)
+├── GL-BE10000 WiFi   192.168.10.196   (Slate 7 Pro  — Prototype)
+│       │
+│       └── Pfad A: USB-Adapter (CDP+/GD101/DiCE) → usbipd Export
+│
+├── WiCAN Pro WiFi    192.168.10.200   (Pfad B — WiFi-native J2534)
+└── Vgate / Macchina  192.168.10.201   (Pfad B — WiFi-native ELM327/J2534)
 ```
-
----
-
-## Fallback: NanoPi R5C
-
-Das ursprüngliche Setup basierte auf einem NanoPi R5C. Die Migrations-Dokumentation
-ist in den einzelnen Geräte-Verzeichnissen erhalten (besonders `gl-inet-be3600/`).
 
 ---
 
 ## Verwandte Dokumentation
 
-- [adapters/README.md](adapters/README.md) — Vollständiger Adapter-Vergleich (4 Adapters)
+- [adapters/README.md](adapters/README.md) — Vollständiger Adapter-Vergleich (8 Adapter, Zwei-Pfad-Architektur)
+- [adapters/wican-pro/router-bridge-setup.md](adapters/wican-pro/router-bridge-setup.md) — GL.iNet als WiFi-Bridge konfigurieren
 - [adapters/godiag-gd101/vdash-setup.md](adapters/godiag-gd101/vdash-setup.md) — vdash Volvo-Tiefdiagnose Guide
 - [adapters/volvo-vida-dice/vida-vm-setup.md](adapters/volvo-vida-dice/vida-vm-setup.md) — VIDA 2014D via Windows-VM
 - [gl-inet-e5800/README.md](gl-inet-e5800/README.md) — Mudi 7 Setup (5G, eMMC)
