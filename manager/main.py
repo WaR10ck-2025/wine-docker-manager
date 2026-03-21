@@ -262,6 +262,11 @@ NANOPI_ETH_HOST = os.getenv("NANOPI_ETH_HOST", "")   # Ethernet-IP des Mini-PCs 
 # OBD2 Monitor Service auf dem Mini-PC (Port 8765)
 OBD_MONITOR_HOST = os.getenv("OBD_MONITOR_HOST", "")
 OBD_MONITOR_PORT = int(os.getenv("OBD_MONITOR_PORT", "8765"))
+# WiFi-OBD2-Adapter — Pfad B (WiCAN Pro + Vgate iCar 2)
+WICAN_HOST = os.getenv("WICAN_HOST", "192.168.10.200")
+WICAN_PORT = int(os.getenv("WICAN_PORT", "3333"))
+VGATE_HOST = os.getenv("VGATE_HOST", "192.168.10.201")
+VGATE_PORT = int(os.getenv("VGATE_PORT", "35000"))
 
 
 def _container_running(name: str) -> bool:
@@ -411,6 +416,29 @@ async def obd_stream():
                         yield f"{line}\n\n"
 
     return StreamingResponse(generator(), media_type="text/event-stream")
+
+
+# ── WiFi-Adapter Pfad B (WiCAN Pro + Vgate iCar 2) ─────────────────────────
+
+@app.get("/wifi-adapter/status")
+def wifi_adapter_status():
+    """Prüft Erreichbarkeit der WiFi-OBD2-Adapter (Pfad B) via TCP-Port-Check."""
+    return {
+        "wican": {
+            "host": WICAN_HOST,
+            "port": WICAN_PORT,
+            "reachable": _host_reachable(WICAN_HOST, WICAN_PORT, timeout=1.5),
+            "protocol": "socketcan",
+            "name": "WiCAN Pro",
+        },
+        "vgate": {
+            "host": VGATE_HOST,
+            "port": VGATE_PORT,
+            "reachable": _host_reachable(VGATE_HOST, VGATE_PORT, timeout=1.5),
+            "protocol": "elm327",
+            "name": "Vgate iCar 2 WiFi",
+        },
+    }
 
 
 # ── Windows VM ──────────────────────────────────────────────────────────────

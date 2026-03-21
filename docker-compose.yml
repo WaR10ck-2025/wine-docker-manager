@@ -52,6 +52,10 @@ services:
       NANOPI_ETH_HOST: "192.168.10.193"             # Ethernet-IP des NanoPi (für Verbindungstyp-Erkennung)
       OBD_MONITOR_HOST: "192.168.10.194"             # IP des Mini-PCs für OBD2 API (WLAN, primär)
       OBD_MONITOR_PORT: "8765"                       # Port des obd_service.py
+      WICAN_HOST: "192.168.10.200"                   # WiCAN Pro WiFi-Adapter (Pfad B)
+      WICAN_PORT: "3333"                             # WiCAN Pro SocketCAN TCP Port
+      VGATE_HOST: "192.168.10.201"                   # Vgate iCar 2 WiFi-Adapter (Pfad B)
+      VGATE_PORT: "35000"                            # Vgate ELM327 TCP Port
     volumes:
       - uploads:/uploads
       - wine-prefix:/wine-prefix

@@ -198,6 +198,27 @@ export function obdStream(onData: (d: ObdData) => void): () => void {
   return () => es.close()
 }
 
+// ── WiFi-Adapter ────────────────────────────────────────────────────────────
+
+export interface WifiAdapterInfo {
+  host: string
+  port: number
+  reachable: boolean
+  protocol: 'socketcan' | 'elm327'
+  name: string
+}
+
+export interface WifiAdapterStatus {
+  wican: WifiAdapterInfo
+  vgate: WifiAdapterInfo
+}
+
+export async function wifiAdapterStatus(): Promise<WifiAdapterStatus> {
+  const r = await fetch(`${BASE}/wifi-adapter/status`)
+  if (!r.ok) throw new Error(await r.text())
+  return r.json()
+}
+
 // ── Fahrzeuge ───────────────────────────────────────────────────────────────
 
 export interface DtcSession {

@@ -6,6 +6,7 @@ import WinetricksPage from './pages/WinetricksPage'
 import UsbIpPage from './pages/UsbIpPage'
 import WindowsVmPage from './pages/WindowsVmPage'
 import VehiclesPage from './pages/VehiclesPage'
+import WifiAdapterPage from './pages/WifiAdapterPage'
 
 const NAV = [
   { to: '/',           label: '🖥  Wine Desktop'  },
@@ -13,6 +14,7 @@ const NAV = [
   { to: '/apps',       label: '▶  Apps'           },
   { to: '/winetricks', label: '🔧  Winetricks'    },
   { to: '/usbip',      label: '🔌  USB/IP'        },
+  { to: '/wifi',       label: '📡  WiFi OBD2'     },
   { to: '/windowsvm',  label: '🪟  Windows VM'    },
   { to: '/vehicles',   label: '🚗  Fahrzeuge'     },
 ]
@@ -51,6 +53,7 @@ export default function App() {
           <Route path="/apps"       element={<AppsPage />} />
           <Route path="/winetricks" element={<WinetricksPage />} />
           <Route path="/usbip"      element={<UsbIpPage />} />
+          <Route path="/wifi"       element={<WifiAdapterPage />} />
           <Route path="/windowsvm"  element={<WindowsVmPage />} />
           <Route path="/vehicles"   element={<VehiclesPage />} />
         </Routes>
