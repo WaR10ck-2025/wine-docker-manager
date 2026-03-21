@@ -97,7 +97,7 @@ export default function UsbIpPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-lg font-semibold text-gray-200">USB/IP — Autocom CDP+</h1>
+      <h1 className="text-lg font-semibold text-gray-200">USB/IP OBD2 — Pfad A</h1>
 
       {/* Tab-Switcher */}
       <div className="flex gap-1 border-b border-gray-800">

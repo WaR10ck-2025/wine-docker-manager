@@ -13,7 +13,7 @@ const NAV = [
   { to: '/install',    label: '📦  Installieren'  },
   { to: '/apps',       label: '▶  Apps'           },
   { to: '/winetricks', label: '🔧  Winetricks'    },
-  { to: '/usbip',      label: '🔌  USB/IP'        },
+  { to: '/usbip',      label: '🔌  USB/IP OBD2'   },
   { to: '/wifi',       label: '📡  WiFi OBD2'     },
   { to: '/windowsvm',  label: '🪟  Windows VM'    },
   { to: '/vehicles',   label: '🚗  Fahrzeuge'     },
