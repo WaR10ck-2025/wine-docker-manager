@@ -1,0 +1,18 @@
+# USB/IP Kernel-Module — Minimal-Config Overlay für GL-BE10000 (Slate 7 Pro)
+# PROTOTYPE — SoC TBD, Profil TBD
+# Wird per `cat dot-config-usbip >> .config` in den SDK-Build integriert.
+# TODO: verify on hardware — SoC-Architektur und Kernel-Version bestätigen
+
+# USB/IP Core + Host-Export
+CONFIG_USBIP_CORE=m
+CONFIG_USBIP_HOST=m
+
+# USB-Serial (FTDI — für Autocom CDP+ 0403:d6da)
+CONFIG_USB_SERIAL=m
+CONFIG_USB_SERIAL_FTDI_SIO=m
+
+# USB/IP Tools (userspace: usbip, usbipd)
+CONFIG_PACKAGE_usbip=y
+CONFIG_PACKAGE_usbip-server=y
+CONFIG_PACKAGE_kmod-usbip=y
+CONFIG_PACKAGE_kmod-usbip-host=y

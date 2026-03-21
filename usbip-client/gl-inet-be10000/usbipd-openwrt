@@ -1,0 +1,108 @@
+#!/bin/sh /etc/rc.common
+# ─────────────────────────────────────────────────────────────────────────────
+# USB/IP Server — OpenWrt init.d Service
+# GL.iNet GL-BE10000 (Slate 7 Pro) — PROTOTYPE
+#
+# Adapter-konfigurierbar via /etc/obd-adapter.conf:
+#   ADAPTER_VENDOR=0403
+#   ADAPTER_PRODUCT=d6da
+#
+# Voraussetzung: kmod-usbip + kmod-usbip-host aus dem SDK-Build installiert.
+# TODO: verify on hardware — USB-Port und Treiber-Kompatibilität prüfen
+#
+# Installation:
+#   cp usbipd-openwrt /etc/init.d/usbipd
+#   chmod +x /etc/init.d/usbipd
+#   /etc/init.d/usbipd enable
+#   /etc/init.d/usbipd start
+#
+# Adapter-Konfiguration:
+#   cp ../adapters/autocom-cdp-plus/adapter.conf /etc/obd-adapter.conf
+#   /etc/init.d/usbipd restart
+#
+# Logs: logread | grep -i usbip
+# ─────────────────────────────────────────────────────────────────────────────
+
+START=94
+STOP=10
+
+# Adapter-Config laden (wenn vorhanden), sonst CDP+ als Standard
+[ -f /etc/obd-adapter.conf ] && . /etc/obd-adapter.conf
+ADAPTER_VENDOR="${ADAPTER_VENDOR:-0403}"
+ADAPTER_PRODUCT="${ADAPTER_PRODUCT:-d6da}"
+
+PIDFILE="/var/run/usbipd.pid"
+
+start() {
+    logger -t usbipd "Adapter: ${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}"
+    logger -t usbipd "Lade Kernel-Module..."
+    insmod /lib/modules/$(uname -r)/usbip-core.ko 2>/dev/null || \
+    modprobe usbip-core 2>/dev/null || \
+    logger -t usbipd "WARNUNG: usbip-core Modul nicht geladen (custom kmod installiert?)"
+
+    insmod /lib/modules/$(uname -r)/usbip-host.ko 2>/dev/null || \
+    modprobe usbip-host 2>/dev/null || \
+    logger -t usbipd "WARNUNG: usbip-host Modul nicht geladen"
+
+    if ! lsmod 2>/dev/null | grep -q usbip; then
+        logger -t usbipd "FEHLER: USB/IP Kernel-Module nicht verfügbar"
+        logger -t usbipd "Bitte kmod-usbip + kmod-usbip-host aus dem SDK-Build installieren"
+        return 1
+    fi
+
+    logger -t usbipd "Starte usbipd Daemon..."
+    usbipd -D
+
+    sleep 1
+    pgrep usbipd > "$PIDFILE" 2>/dev/null || true
+
+    sleep 2
+    _bind_adapter
+}
+
+stop() {
+    logger -t usbipd "Stoppe usbipd..."
+    _unbind_adapter
+
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat $PIDFILE)" 2>/dev/null || true
+        rm -f "$PIDFILE"
+    else
+        killall usbipd 2>/dev/null || true
+    fi
+
+    logger -t usbipd "Gestoppt"
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+_bind_adapter() {
+    BID=$(usbip list -l 2>/dev/null \
+        | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" \
+        | grep -o 'busid [^ ]*' \
+        | awk '{print $2}' \
+        | head -1)
+
+    if [ -n "$BID" ]; then
+        usbip bind -b "$BID" 2>/dev/null && \
+            logger -t usbipd "Adapter ${ADAPTER_VENDOR}:${ADAPTER_PRODUCT} gebunden: busid $BID ✓" || \
+            logger -t usbipd "Adapter bereits gebunden oder Bind fehlgeschlagen: $BID"
+    else
+        logger -t usbipd "Adapter (${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}) nicht gefunden"
+        logger -t usbipd "USB-Gerät eingesteckt? → usbip list -l"
+    fi
+}
+
+_unbind_adapter() {
+    BID=$(usbip list -l 2>/dev/null \
+        | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" \
+        | grep -o 'busid [^ ]*' \
+        | awk '{print $2}' \
+        | head -1)
+
+    [ -n "$BID" ] && usbip unbind -b "$BID" 2>/dev/null || true
+}

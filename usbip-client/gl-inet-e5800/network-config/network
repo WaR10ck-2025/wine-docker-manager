@@ -1,0 +1,36 @@
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option ula_prefix 'fde7:b4c3:a9d2::/48'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ipaddr '192.168.10.192'
+	option netmask '255.255.255.0'
+	option gateway '192.168.10.1'
+	option dns '192.168.10.1 8.8.8.8'
+
+# WiFi-Client (wwan) — Uplink über 2.4 GHz AP (HTP-1-2.4G)
+config interface 'wwan'
+	option proto 'static'
+	option ipaddr '192.168.10.195'
+	option netmask '255.255.255.0'
+	option gateway '192.168.10.1'
+	option dns '192.168.10.1 8.8.8.8'
+
+# 5G-Modem — LTE/5G NR Uplink (SIM/eSIM)
+# Aktivieren sobald SIM eingelegt: uci set network.modem.disabled=0; uci commit
+config interface 'modem'
+	option device 'wwan0'
+	option proto 'dhcp'
+	option metric '10'
+	option disabled '1'
+
+config interface 'wan'
+	option device 'eth0'
+	option proto 'dhcp'

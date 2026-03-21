@@ -77,3 +77,38 @@ echo -e "  Wine Desktop: ${CYAN}http://${LOCAL_IP}:8080${NC}"
 echo -e "  API Docs:     ${CYAN}http://${LOCAL_IP}:4000/docs${NC}"
 echo -e "  VNC direkt:   ${CYAN}${LOCAL_IP}:5900${NC}"
 echo -e "${GREEN}════════════════════════════════════════${NC}\n"
+
+
+
+# ── QR-Code Credentials (aktivierbar via .env) ───────────────────────────────
+# Aktivieren: QR_ENABLED=true und QR_PIN=1234 in .env setzen
+_QR_ENABLED="${QR_ENABLED:-false}"
+_QR_PIN_VALUE="${QR_PIN:-}"
+if [ -f ".env" ]; then
+    _QR_ENV_ENABLED=$(grep -E "^QR_ENABLED=" .env 2>/dev/null | cut -d= -f2- | tr -d '"' | xargs || true)
+    _QR_ENV_PIN=$(grep -E "^QR_PIN=[^#]+" .env 2>/dev/null | cut -d= -f2- | tr -d '"' | xargs || true)
+    [ -n "${_QR_ENV_ENABLED:-}" ] && _QR_ENABLED="$_QR_ENV_ENABLED"
+    [ -n "${_QR_ENV_PIN:-}" ]     && _QR_PIN_VALUE="$_QR_ENV_PIN"
+fi
+_QRCREDS_IP="${LOCAL_IP:-${NAS_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}}"
+if command -v qrcreds &>/dev/null && [ "$_QR_ENABLED" = "true" ] && [ -n "${_QR_PIN_VALUE:-}" ]; then
+    echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  QR-Code Zugang — SSH + Tailscale${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+    _QR_ALIAS="$(basename "$(pwd)")"
+    qrcreds generate ssh \
+        --host "$_QRCREDS_IP" \
+        --user "${USER:-$(whoami)}" \
+        --alias "$_QR_ALIAS" \
+        --pin "$_QR_PIN_VALUE" --expires 60 2>/dev/null || true
+    echo -e "  PIN: ${YELLOW}${_QR_PIN_VALUE}${NC}  |  Termius App → QR scannen"
+    _TS_KEY=""
+    [ -f ".env" ] && _TS_KEY=$(grep -E "^TS_AUTHKEY=[^#]+" .env 2>/dev/null | cut -d= -f2- | tr -d '"' | xargs || true)
+    if [ -n "${_TS_KEY:-}" ]; then
+        echo ""
+        qrcreds generate tailscale --authkey "$_TS_KEY" \
+            --hostname "$_QR_ALIAS" \
+            --pin "$_QR_PIN_VALUE" --expires 60 2>/dev/null || true
+    fi
+    echo ""
+fi

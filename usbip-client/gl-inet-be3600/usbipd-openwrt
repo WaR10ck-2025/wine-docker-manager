@@ -1,0 +1,98 @@
+#!/bin/sh /etc/rc.common
+# ─────────────────────────────────────────────────────────────────────────────
+# USB/IP Server — OpenWrt init.d Service (OHNE procd, da forking)
+# GL.iNet GL-BE3600 (Slate 7)
+#
+# Voraussetzung: kmod-usbip + kmod-usbip-host aus dem SDK-Build installiert.
+#
+# Installation:
+#   cp usbipd-openwrt /etc/init.d/usbipd
+#   chmod +x /etc/init.d/usbipd
+#   /etc/init.d/usbipd enable
+#   /etc/init.d/usbipd start
+#
+# Logs: logread | grep -i usbip
+# ─────────────────────────────────────────────────────────────────────────────
+
+START=94
+STOP=10
+
+AUTOCOM_VENDOR="0403"
+AUTOCOM_PRODUCT="d6da"
+PIDFILE="/var/run/usbipd.pid"
+
+start() {
+    logger -t usbipd "Lade Kernel-Module..."
+    insmod /lib/modules/$(uname -r)/usbip-core.ko 2>/dev/null || \
+    modprobe usbip-core 2>/dev/null || \
+    logger -t usbipd "WARNUNG: usbip-core Modul nicht geladen (custom kmod installiert?)"
+
+    insmod /lib/modules/$(uname -r)/usbip-host.ko 2>/dev/null || \
+    modprobe usbip-host 2>/dev/null || \
+    logger -t usbipd "WARNUNG: usbip-host Modul nicht geladen"
+
+    if ! lsmod 2>/dev/null | grep -q usbip; then
+        logger -t usbipd "FEHLER: USB/IP Kernel-Module nicht verfügbar"
+        logger -t usbipd "Bitte kmod-usbip + kmod-usbip-host aus dem SDK-Build installieren"
+        return 1
+    fi
+
+    logger -t usbipd "Starte usbipd Daemon..."
+    usbipd -D
+
+    # PID speichern
+    sleep 1
+    pgrep usbipd > "$PIDFILE" 2>/dev/null || true
+
+    # CDP+ automatisch binden
+    sleep 2
+    _bind_autocom
+}
+
+stop() {
+    logger -t usbipd "Stoppe usbipd..."
+    _unbind_autocom
+
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat $PIDFILE)" 2>/dev/null || true
+        rm -f "$PIDFILE"
+    else
+        killall usbipd 2>/dev/null || true
+    fi
+
+    logger -t usbipd "Gestoppt"
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+# CDP+ (0403:d6da) suchen und binden
+_bind_autocom() {
+    BID=$(usbip list -l 2>/dev/null \
+        | grep "${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT}" \
+        | grep -o 'busid [^ ]*' \
+        | awk '{print $2}' \
+        | head -1)
+
+    if [ -n "$BID" ]; then
+        usbip bind -b "$BID" 2>/dev/null && \
+            logger -t usbipd "CDP+ gebunden: busid $BID ✓" || \
+            logger -t usbipd "CDP+ bereits gebunden oder Bind fehlgeschlagen: $BID"
+    else
+        logger -t usbipd "CDP+ (${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT}) nicht gefunden"
+        logger -t usbipd "USB-Gerät eingesteckt? → usbip list -l"
+    fi
+}
+
+_unbind_autocom() {
+    BID=$(usbip list -l 2>/dev/null \
+        | grep "${AUTOCOM_VENDOR}:${AUTOCOM_PRODUCT}" \
+        | grep -o 'busid [^ ]*' \
+        | awk '{print $2}' \
+        | head -1)
+
+    [ -n "$BID" ] && usbip unbind -b "$BID" 2>/dev/null || true
+}

@@ -1,0 +1,23 @@
+# USB/IP Kernel-Module — Minimale .config für GL-BE3600 (ipq53xx, OpenWrt 23.05)
+# Wird als Overlay auf die bestehende .config angewendet.
+# Kompiliert nur die für den OBD2-Use-Case nötigen Module.
+
+# USB/IP Core + Host
+CONFIG_USBIP_CORE=m
+CONFIG_USBIP_HOST=m
+CONFIG_PACKAGE_kmod-usbip=m
+CONFIG_PACKAGE_kmod-usbip-host=m
+
+# USB/IP Userspace Tools
+CONFIG_PACKAGE_usbip-server=y
+CONFIG_PACKAGE_usbip-client=y
+
+# USB Serial (FTDI 0403:d6da für Autocom CDP+)
+CONFIG_USB_SERIAL=m
+CONFIG_USB_SERIAL_FTDI_SIO=m
+CONFIG_PACKAGE_kmod-usb-serial=m
+CONFIG_PACKAGE_kmod-usb-serial-ftdi=m
+
+# USB Core (falls nicht schon aktiviert)
+CONFIG_PACKAGE_kmod-usb-core=m
+CONFIG_PACKAGE_kmod-usb3=m

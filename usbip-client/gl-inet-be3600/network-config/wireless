@@ -1,0 +1,38 @@
+# /etc/config/wireless — GL.iNet GL-BE3600 (Slate 7)
+# WiFi-Client-Konfiguration (Repeater-Modus zu HTP-1-2.4G)
+#
+# ANWENDUNG:
+#   Option A (empfohlen): GL.iNet Admin-UI → Internet → Repeater
+#   Option B (CLI):
+#     scp wireless root@192.168.8.1:/etc/config/wireless
+#     ssh root@192.168.8.1 "wifi reload"
+#
+# ACHTUNG: Diese Datei ergänzt die bestehende wireless-Config.
+# GL.iNet Router haben eigene APs (radio0 für 2.4G, radio1 für 5G).
+# Der STA (Client) wird als zweites Interface auf radio0 hinzugefügt.
+
+# ─── 2.4 GHz Radio (radio0) ────────────────────────────────────────────────
+config wifi-device 'radio0'
+	option type mac80211
+	option band '2g'
+	option htmode 'HT20'
+	option disabled '0'
+
+# ─── Eigener AP (2.4G) — Standard GL.iNet AP bleibt erhalten ───────────────
+config wifi-iface 'default_radio0'
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'GL-BE3600-AutocomOBD'
+	option encryption 'psk2'
+	option key 'autocom2024'
+
+# ─── WiFi-Client (STA) → HTP-1-2.4G (WPA2-PSK) ────────────────────────────
+config wifi-iface 'wifinet_sta'
+	option device 'radio0'
+	option network 'wwan'
+	option mode 'sta'
+	option ssid 'HTP-1-2.4G'
+	option encryption 'psk2'
+	option key 'test123456'
+	option disabled '0'

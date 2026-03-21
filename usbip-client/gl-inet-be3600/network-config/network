@@ -1,0 +1,45 @@
+# /etc/config/network — GL.iNet GL-BE3600 (Slate 7)
+# Netzwerk-Konfiguration für Repeater + statische IPs
+#
+# IPs nach Migration:
+#   br-lan / LAN-Port: 192.168.10.193  (Ethernet, erreichbar vom Umbrel)
+#   wwan   / WiFi-STA: 192.168.10.194  (WiFi, primäre OBD2-Verbindung)
+#
+# ANWENDUNG:
+#   scp network root@192.168.8.1:/etc/config/network
+#   ssh root@192.168.8.1 "/etc/init.d/network restart"
+
+config interface 'loopback'
+	option device 'lo'
+	option proto 'loopback'
+
+# ─── LAN-Port (Ethernet → Umbrel per Kabel) ────────────────────────────────
+# Statische IP 192.168.10.193 (wie vorher eth0 des NanoPi R5C)
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ipaddr '192.168.10.193'
+	option netmask '255.255.255.0'
+	option gateway '192.168.10.1'
+	list dns '192.168.10.1'
+	list dns '8.8.8.8'
+
+# ─── WiFi-Client (STA → HTP-1-2.4G, primäre Verbindung) ───────────────────
+# Statische IP 192.168.10.194 (wie vorher wlan0 des NanoPi R5C)
+config interface 'wwan'
+	option proto 'static'
+	option ipaddr '192.168.10.194'
+	option netmask '255.255.255.0'
+	option gateway '192.168.10.1'
+	list dns '192.168.10.1'
+	list dns '8.8.8.8'
+
+# ─── WAN-Port (ungenutzt, deaktiviert) ─────────────────────────────────────
+# GL-BE3600 WAN-Port ist im Repeater-Modus nicht nötig
+config interface 'wan'
+	option device 'eth0'
+	option proto 'none'
+
+# ─── Globals ───────────────────────────────────────────────────────────────
+config globals 'globals'
+	option ula_prefix 'auto'

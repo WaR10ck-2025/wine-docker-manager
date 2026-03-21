@@ -1,0 +1,75 @@
+#!/bin/sh /etc/rc.common
+# ─────────────────────────────────────────────────────────────────────────────
+# OBD2 Display Service — OpenWrt procd init.d
+# GL.iNet GL-BE3600 (Slate 7)
+#
+# Zeigt OBD2-Daten auf dem 76×284px Touchscreen des GL-BE3600.
+# Stoppt gl_screen (GL.iNet Standard-UI) und übernimmt den Framebuffer.
+# Beim Stopp wird gl_screen automatisch wiederhergestellt.
+#
+# Abhängigkeit: obd-monitor Service muss laufen (Port 8765 lokal).
+#
+# Installation:
+#   cp obd-display /etc/init.d/obd-display
+#   chmod +x /etc/init.d/obd-display
+#   /etc/init.d/obd-display enable
+#   /etc/init.d/obd-display start
+#
+# Logs: logread | grep -i 'obd-display\|display'
+# ─────────────────────────────────────────────────────────────────────────────
+
+USE_PROCD=1
+START=96     # Nach obd-monitor (START=95)
+STOP=9       # Vor obd-monitor beim Herunterfahren
+
+INSTALL_DIR="/opt/obd-monitor"
+USB_PKG_DIR="/mnt/usb/obd-pkgs"
+SCRIPT="$INSTALL_DIR/display_service.py"
+PIDFILE="/var/run/obd-display.pid"
+
+start_service() {
+    # Prüfe ob Framebuffer vorhanden
+    if [ ! -e /dev/fb0 ]; then
+        logger -t obd-display "FEHLER: /dev/fb0 nicht gefunden — kein Framebuffer"
+        return 1
+    fi
+
+    # Prüfe ob display_service.py installiert
+    if [ ! -f "$SCRIPT" ]; then
+        logger -t obd-display "FEHLER: $SCRIPT nicht gefunden — install_display.sh ausführen"
+        return 1
+    fi
+
+    # USB-Stick-Pakete prüfen
+    if [ ! -d "$USB_PKG_DIR" ]; then
+        logger -t obd-display "WARNUNG: $USB_PKG_DIR nicht gefunden — USB-Stick eingesteckt?"
+    fi
+
+    logger -t obd-display "Starte OBD2 Display Service (76x284px, /dev/fb0)"
+
+    procd_open_instance
+    procd_set_param env PYTHONPATH="$USB_PKG_DIR"
+    procd_set_param command /usr/bin/python3 "$SCRIPT"
+    procd_set_param dir "$INSTALL_DIR"
+    # Auto-Restart: max 3 Neustarts in 60s (verhindert Crash-Schleife)
+    procd_set_param respawn 60 5 3
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service() {
+    logger -t obd-display "Stoppe OBD2 Display — stelle gl_screen wieder her"
+    # display_service.py stellt gl_screen im finally-Block wieder her.
+    # Falls der Prozess hängt oder abrupt stirbt, manuell wiederherstellen:
+    sleep 1
+    if ! pgrep -f display_service.py > /dev/null 2>&1; then
+        /etc/init.d/gl_screen start 2>/dev/null || true
+        logger -t obd-display "gl_screen wiederhergestellt (Fallback)"
+    fi
+}
+
+service_triggers() {
+    # Bei Netzwerkänderungen neu starten (WiFi-IP könnte sich ändern)
+    procd_add_reload_trigger "network"
+}

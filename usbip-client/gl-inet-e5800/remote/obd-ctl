@@ -1,0 +1,655 @@
+#!/bin/sh
+# ═══════════════════════════════════════════════════════════════════════════════
+# obd-ctl — GL.iNet GL-E5800 (Mudi 7) Management-CLI
+#
+# Wird auf dem Router unter /usr/local/bin/obd-ctl deployt.
+# Verwendbar direkt via SSH oder interaktiv auf dem Router.
+#
+# VERWENDUNG:
+#   obd-ctl BEFEHL [ARGUMENTE]
+#
+# BEFEHLE:
+#   status              Kompakte Übersicht: Services, Netz, OBD, USB/IP
+#   start  [svc]        Service starten  (all | obd | display | usbipd | vpn)
+#   stop   [svc]        Service stoppen
+#   restart [svc]       Service neu starten
+#   enable  [svc]       Autostart aktivieren
+#   disable [svc]       Autostart deaktivieren
+#
+#   logs  [n]           Letzte n Logzeilen (Standard: 50)
+#   follow              Logs live verfolgen
+#   obd                 OBD2 Live-Daten (JSON + formatiert)
+#   dtcs                Fehlercodes (DTCs) lesen
+#   clear-dtcs          Fehlercodes löschen
+#
+#   bind                Adapter an USB/IP binden (VID:PID aus /etc/obd-adapter.conf)
+#   unbind              Adapter freigeben
+#   usbip               USB/IP Status (gebundene Geräte + Clients)
+#   adapter             Adapter-Konfiguration anzeigen
+#
+#   ip                  Alle Netzwerk-Interfaces + Routen
+#   wifi [SSID PW]      WiFi-Status anzeigen oder neu konfigurieren
+#   modem               5G-Modem Status + Aktivierung
+#   vpn status          VPN-Status anzeigen
+#   vpn start|stop      VPN starten/stoppen
+#   vpn config FILE     WireGuard-Config importieren
+#
+#   display next        Zum nächsten Display-Screen wechseln
+#   display off         Bildschirm ausschalten
+#   display on          Bildschirm einschalten (gl_screen falls vorhanden)
+#   display obd         OBD-Display starten
+#
+#   info                Geräteinformationen (CPU, RAM, Uptime, eMMC)
+#   update              Skript-Dateien aktualisieren (deploy)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+INSTALL_DIR="/opt/obd-monitor"
+VENV_DIR="/opt/obd-venv"
+OBD_API="http://127.0.0.1:8765"
+
+B='\033[1m'
+G='\033[0;32m'
+Y='\033[1;33m'
+R='\033[0;31m'
+C='\033[0;36m'
+N='\033[0m'
+GRAY='\033[0;37m'
+
+_ok()   { printf "${G}  ✓${N} %s\n" "$1"; }
+_fail() { printf "${R}  ✗${N} %s\n" "$1"; }
+_warn() { printf "${Y}  !${N} %s\n" "$1"; }
+_head() { printf "\n${B}${C}── %s${N}\n" "$1"; }
+
+# Adapter-Config laden (VID:PID konfigurierbar)
+_load_adapter() {
+    ADAPTER_VENDOR="0403"
+    ADAPTER_PRODUCT="d6da"
+    ADAPTER_NAME="Autocom CDP+"
+    [ -f /etc/obd-adapter.conf ] && . /etc/obd-adapter.conf
+}
+
+_svc_state() {
+    local svc="$1"
+    if [ ! -f "/etc/init.d/$svc" ]; then
+        printf "${GRAY}nicht installiert${N}"
+        return
+    fi
+    if pgrep -f "$svc" >/dev/null 2>&1 || \
+       /etc/init.d/"$svc" status 2>/dev/null | grep -qi 'running'; then
+        printf "${G}läuft${N}"
+    else
+        printf "${R}gestoppt${N}"
+    fi
+}
+
+_obd_json() {
+    curl -s --max-time 3 "$OBD_API/$1" 2>/dev/null
+}
+
+_modem_up() {
+    ip addr show wwan0 2>/dev/null | grep -q 'inet ' && echo "1" || echo "0"
+}
+
+# ── status ────────────────────────────────────────────────────────────────────
+cmd_status() {
+    _load_adapter
+    echo ""
+    printf "${B}${C}╔══════════════════════════════════╗\n"
+    printf "║  GL-E5800 (Mudi 7) OBD Status    ║\n"
+    printf "╚══════════════════════════════════╝${N}\n"
+
+    _head "Services"
+    for svc in usbipd obd-monitor obd-display; do
+        state=$(_svc_state "$svc")
+        printf "  %-14s %b\n" "$svc" "$state"
+    done
+    # gl_screen optional (existiert möglicherweise nicht auf E5800)
+    if [ -f /etc/init.d/gl_screen ]; then
+        state=$(_svc_state "gl_screen")
+        printf "  %-14s %b\n" "gl_screen" "$state"
+    fi
+
+    # VPN
+    if command -v tailscale >/dev/null 2>&1; then
+        ts_ip=$(tailscale ip 2>/dev/null | head -1)
+        [ -n "$ts_ip" ] && \
+            printf "  %-14s %b\n" "vpn (ts)" "${G}aktiv${N}" || \
+            printf "  %-14s %b\n" "vpn (ts)" "${GRAY}getrennt${N}"
+    elif command -v wg >/dev/null 2>&1; then
+        vpn_state=$(wg show 2>/dev/null | grep -c 'interface' || echo 0)
+        [ "$vpn_state" -gt 0 ] && \
+            printf "  %-14s %b\n" "vpn (wg)" "${G}aktiv${N}" || \
+            printf "  %-14s %b\n" "vpn (wg)" "${GRAY}getrennt${N}"
+    fi
+
+    _head "Netzwerk"
+    for iface in br-lan wlan0 eth0 wg0; do
+        ip_addr=$(ip addr show "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | head -1)
+        [ -n "$ip_addr" ] && printf "  %-8s %s\n" "$iface" "$ip_addr"
+    done
+    # 5G Modem Status
+    modem_ip=$(ip addr show wwan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | head -1)
+    if [ -n "$modem_ip" ]; then
+        printf "  %-8s %s ${G}(5G aktiv)${N}\n" "wwan0" "$modem_ip"
+    else
+        printf "  %-8s %b\n" "wwan0" "${GRAY}5G/LTE nicht aktiv${N}"
+    fi
+    wifi_ssid=$(iwinfo wlan0 info 2>/dev/null | grep 'ESSID' | awk -F'"' '{print $2}')
+    [ -n "$wifi_ssid" ] && printf "  WiFi-SSID: %s\n" "$wifi_ssid"
+
+    _head "USB / $ADAPTER_NAME"
+    if command -v usbip >/dev/null 2>&1; then
+        adapter=$(usbip list -l 2>/dev/null | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" || echo '')
+        if [ -n "$adapter" ]; then
+            _ok "$ADAPTER_NAME erkannt: $(echo "$adapter" | grep -o 'busid [^ ]*')"
+            bound=$(usbip list -l 2>/dev/null | grep -A1 "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" | grep -c 'usbip-host' || true)
+            [ "$bound" -gt 0 ] && _ok "$ADAPTER_NAME gebunden (USB/IP)" || _warn "$ADAPTER_NAME nicht gebunden"
+        else
+            _fail "$ADAPTER_NAME nicht erkannt (${ADAPTER_VENDOR}:${ADAPTER_PRODUCT})"
+        fi
+    else
+        _warn "usbip nicht installiert (nur nach SDK-Build verfügbar)"
+    fi
+
+    _head "OBD2"
+    obd_json=$(_obd_json "obd/status")
+    if [ -n "$obd_json" ]; then
+        connected=$(echo "$obd_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('connected',''))" 2>/dev/null)
+        proto=$(echo "$obd_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('protocol','') or '-')" 2>/dev/null)
+        if [ "$connected" = "True" ]; then
+            _ok "Verbunden: $proto"
+            data_json=$(_obd_json "obd/data")
+            if [ -n "$data_json" ]; then
+                echo "$data_json" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+def f(k,fmt,u): v=d.get(k); return fmt.format(v)+u if v is not None else '---'
+print('  RPM:   '+f('rpm','{:.0f}',' rpm'))
+print('  Speed: '+f('speed','{:.0f}',' km/h'))
+print('  Temp:  '+f('coolant_temp','{:.0f}','°C'))
+print('  Batt:  '+f('battery_voltage','{:.1f}',' V'))
+" 2>/dev/null
+            fi
+        else
+            err=$(echo "$obd_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','') or '')" 2>/dev/null)
+            _fail "Nicht verbunden${err:+: $err}"
+        fi
+    else
+        _fail "OBD-API nicht erreichbar (http://127.0.0.1:8765)"
+    fi
+
+    echo ""
+}
+
+# ── start/stop/restart/enable/disable ─────────────────────────────────────────
+cmd_service() {
+    local action="$1"
+    local svc="${2:-all}"
+
+    _svcs() {
+        case "$svc" in
+            all) echo "usbipd obd-monitor obd-display" ;;
+            obd) echo "obd-monitor" ;;
+            display) echo "obd-display" ;;
+            *) echo "$svc" ;;
+        esac
+    }
+
+    for s in $(_svcs); do
+        if [ -f "/etc/init.d/$s" ]; then
+            /etc/init.d/"$s" "$action" 2>/dev/null && \
+                _ok "$s: $action" || _warn "$s: $action (Fehler oder bereits im gewünschten Zustand)"
+        else
+            _warn "$s nicht installiert"
+        fi
+    done
+}
+
+# ── logs ─────────────────────────────────────────────────────────────────────
+cmd_logs() {
+    local n="${1:-50}"
+    printf "${C}── Letzte %s Logzeilen ──────────────────────${N}\n" "$n"
+    logread | tail -"$n"
+}
+
+cmd_follow() {
+    printf "${C}── Live-Logs (STRG+C zum Beenden) ──────────${N}\n"
+    logread -f
+}
+
+# ── obd ──────────────────────────────────────────────────────────────────────
+cmd_obd() {
+    _head "OBD2 Status"
+    curl -s --max-time 3 "$OBD_API/obd/status" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print('  Verbunden:  '+str(d.get('connected','-')))
+    print('  Protokoll:  '+str(d.get('protocol') or '-'))
+    print('  Port:       '+str(d.get('port') or '-'))
+    e=d.get('error')
+    if e: print('  Fehler:     '+str(e))
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+
+    _head "OBD2 Live-Daten"
+    curl -s --max-time 3 "$OBD_API/obd/data" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    def f(k,fmt,u): v=d.get(k); return fmt.format(v)+u if v is not None else '---'
+    print('  RPM:          '+f('rpm',           '{:.0f}', ' rpm'))
+    print('  Speed:        '+f('speed',          '{:.0f}', ' km/h'))
+    print('  Coolant:      '+f('coolant_temp',   '{:.0f}', ' °C'))
+    print('  Throttle:     '+f('throttle',       '{:.0f}', '%'))
+    print('  Engine Load:  '+f('engine_load',    '{:.0f}', '%'))
+    print('  Short Trim:   '+f('short_fuel_trim','{:+.1f}', '%'))
+    print('  Long Trim:    '+f('long_fuel_trim', '{:+.1f}', '%'))
+    print('  Battery:      '+f('battery_voltage','{:.1f}', ' V'))
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+    echo ""
+}
+
+cmd_dtcs() {
+    _head "Fehlercodes (DTCs)"
+    curl -s --max-time 3 "$OBD_API/obd/dtcs" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    codes=d.get('codes',[])
+    if codes:
+        for c in codes: print('  '+c.get('code','-')+': '+c.get('description','-'))
+    else:
+        print('  Keine Fehlercodes gespeichert')
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+    echo ""
+}
+
+cmd_clear_dtcs() {
+    printf "Fehlercodes löschen? [j/N] "
+    read -r ans
+    [ "$ans" = "j" ] || [ "$ans" = "J" ] || { echo "Abgebrochen."; return; }
+    curl -s -X POST --max-time 5 "$OBD_API/obd/clear-dtcs" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print('  '+str(d.get('message',d)))
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+}
+
+# ── bind/unbind ───────────────────────────────────────────────────────────────
+cmd_bind() {
+    _load_adapter
+    _head "$ADAPTER_NAME binden (${ADAPTER_VENDOR}:${ADAPTER_PRODUCT})"
+    BID=$(usbip list -l 2>/dev/null | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" | grep -o 'busid [^ ]*' | awk '{print $2}' | head -1)
+    if [ -n "$BID" ]; then
+        usbip bind -b "$BID" 2>/dev/null && _ok "$ADAPTER_NAME gebunden: $BID" || \
+            _warn "Bind fehlgeschlagen (schon gebunden?)"
+    else
+        _fail "$ADAPTER_NAME nicht gefunden (${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}). Eingesteckt? lsusb:"
+        lsusb 2>/dev/null || echo "  (lsusb nicht verfügbar)"
+    fi
+}
+
+cmd_unbind() {
+    _load_adapter
+    BID=$(usbip list -l 2>/dev/null | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" | grep -o 'busid [^ ]*' | awk '{print $2}' | head -1)
+    [ -n "$BID" ] && usbip unbind -b "$BID" && _ok "$ADAPTER_NAME freigegeben: $BID" || \
+        _warn "$ADAPTER_NAME nicht gebunden oder nicht gefunden"
+}
+
+cmd_usbip() {
+    _head "USB/IP Status"
+    usbip list -l 2>/dev/null || _warn "usbip nicht verfügbar (kmod-usbip-host installiert?)"
+    echo ""
+    _head "Verbundene Clients"
+    cat /sys/bus/platform/drivers/usbip-host/*/usbip_status 2>/dev/null || \
+        echo "  Keine aktiven USB/IP-Verbindungen"
+}
+
+cmd_adapter() {
+    _load_adapter
+    _head "Adapter-Konfiguration"
+    echo "  Name:     $ADAPTER_NAME"
+    echo "  VID:PID:  ${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}"
+    echo "  Treiber:  ${ADAPTER_DRIVER:-(Standard)}"
+    echo "  Protokoll:${ADAPTER_PROTOCOL:-(nicht gesetzt)}"
+    echo "  Linux:    ${ADAPTER_LINUX_SUPPORT:-(nicht gesetzt)}"
+    echo ""
+    if [ -f /etc/obd-adapter.conf ]; then
+        _ok "Konfiguration: /etc/obd-adapter.conf"
+    else
+        _warn "Keine /etc/obd-adapter.conf — Standardwerte (CDP+ 0403:d6da)"
+        echo "  Adapter wechseln: cp /path/to/adapter.conf /etc/obd-adapter.conf"
+    fi
+}
+
+# ── ip ───────────────────────────────────────────────────────────────────────
+cmd_ip() {
+    _head "Netzwerk-Interfaces"
+    ip addr show 2>/dev/null | grep -E 'inet |^[0-9]+:' | grep -v '127.0.0.1'
+    _head "Routen"
+    ip route 2>/dev/null
+    _head "WiFi (wlan0)"
+    iwinfo wlan0 info 2>/dev/null || echo "  (iwinfo nicht verfügbar)"
+    _head "5G-Modem (wwan0)"
+    ip addr show wwan0 2>/dev/null | grep -E 'inet |state' | head -5 || \
+        echo "  wwan0 nicht aktiv (obd-ctl modem)"
+    echo ""
+}
+
+# ── wifi ─────────────────────────────────────────────────────────────────────
+cmd_wifi() {
+    if [ -z "$1" ]; then
+        _head "WiFi-Status"
+        iwinfo 2>/dev/null || ip link show wlan0 2>/dev/null
+        uci show wireless 2>/dev/null | grep -E 'ssid|encryption' || true
+    else
+        local ssid="$1"
+        local pass="${2:-}"
+        _head "Konfiguriere WiFi: $ssid"
+        uci set wireless.wifinet_sta.ssid="$ssid"
+        [ -n "$pass" ] && uci set wireless.wifinet_sta.key="$pass"
+        uci commit wireless
+        wifi reload
+        sleep 3
+        ip addr show wlan0 2>/dev/null | grep 'inet '
+        _ok "WiFi konfiguriert: $ssid"
+    fi
+}
+
+# ── modem (5G) ───────────────────────────────────────────────────────────────
+cmd_modem() {
+    local subcmd="${1:-status}"
+
+    case "$subcmd" in
+        status)
+            _head "5G/LTE Modem Status (wwan0)"
+            modem_disabled=$(uci get network.modem.disabled 2>/dev/null || echo "1")
+            if [ "$modem_disabled" = "0" ]; then
+                _ok "Modem aktiviert (UCI)"
+            else
+                _warn "Modem deaktiviert (UCI). Aktivieren: obd-ctl modem enable"
+            fi
+            echo ""
+            echo "  wwan0 Interface:"
+            ip addr show wwan0 2>/dev/null | grep -E 'inet |state' | head -5 || \
+                echo "  wwan0 nicht vorhanden (Treiber geladen?)"
+            echo ""
+            echo "  Roaming-Status:"
+            # Modem-Manager oder einfache AT-Kommandos (falls mmcli nicht verfügbar)
+            if command -v mmcli >/dev/null 2>&1; then
+                mmcli -m 0 --simple-status 2>/dev/null || echo "  (mmcli: Modem nicht bereit)"
+            else
+                echo "  (mmcli nicht installiert — Modem via UCI gesteuert)"
+            fi
+            ;;
+
+        enable)
+            _head "5G-Modem aktivieren"
+            uci set network.modem=interface
+            uci set network.modem.device='wwan0'
+            uci set network.modem.proto='dhcp'
+            uci set network.modem.metric='10'
+            uci set network.modem.disabled='0'
+            uci commit network
+            /etc/init.d/network restart
+            sleep 5
+            ip addr show wwan0 2>/dev/null | grep 'inet ' && \
+                _ok "5G-Modem aktiv: $(ip addr show wwan0 | grep 'inet ' | awk '{print $2}')" || \
+                _warn "wwan0 IP noch nicht zugewiesen (SIM eingelegt? Signal?)"
+            ;;
+
+        disable)
+            _head "5G-Modem deaktivieren"
+            uci set network.modem.disabled='1'
+            uci commit network
+            /etc/init.d/network restart
+            _ok "5G-Modem deaktiviert"
+            ;;
+
+        *)
+            echo "modem: Unbekannter Unterbefehl: $subcmd"
+            echo "  Gültig: status | enable | disable"
+            ;;
+    esac
+}
+
+# ── vpn ──────────────────────────────────────────────────────────────────────
+cmd_vpn() {
+    local subcmd="${1:-status}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        status)
+            _head "VPN Status"
+
+            if command -v tailscale >/dev/null 2>&1; then
+                printf "\n${C}Tailscale:${N}\n"
+                ts_ip=$(tailscale ip 2>/dev/null | head -1)
+                tailscale status --json 2>/dev/null | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    self=d.get('Self',{})
+    state=d.get('BackendState','Unbekannt')
+    print('  Status:   '+state)
+    print('  Hostname: '+str(self.get('HostName','-')))
+    print('  Tailnet:  '+str(self.get('DNSName','-')))
+except: pass
+" 2>/dev/null
+                [ -n "$ts_ip" ] && \
+                    _ok "Tailscale IP: $ts_ip" || \
+                    _warn "Tailscale nicht verbunden"
+            fi
+
+            if command -v wg >/dev/null 2>&1; then
+                printf "\n${C}WireGuard:${N}\n"
+                wg show 2>/dev/null || echo "  Kein aktives WireGuard Interface"
+            fi
+
+            [ ! -x /usr/bin/tailscale ] && [ ! -x /usr/sbin/wg ] && \
+                _warn "Kein VPN installiert. setup-vpn.sh ausführen."
+            ;;
+
+        start)
+            if command -v tailscale >/dev/null 2>&1; then
+                [ -f /etc/init.d/tailscaled ] && /etc/init.d/tailscaled start 2>/dev/null || true
+                sleep 2
+                tailscale up --accept-routes 2>/dev/null && _ok "Tailscale verbunden" || \
+                    _warn "tailscale up fehlgeschlagen: obd-ctl vpn login"
+            elif command -v wg-quick >/dev/null 2>&1; then
+                WG_CONF=$(ls /etc/wireguard/*.conf 2>/dev/null | head -1)
+                [ -n "$WG_CONF" ] && wg-quick up "$WG_CONF" && _ok "WireGuard: $(basename $WG_CONF .conf)" || \
+                    _fail "Keine WireGuard-Config unter /etc/wireguard/"
+            else
+                _fail "Kein VPN installiert"
+            fi
+            ;;
+
+        stop)
+            command -v tailscale >/dev/null 2>&1 && tailscale down 2>/dev/null && _ok "Tailscale getrennt" || true
+            if command -v wg-quick >/dev/null 2>&1; then
+                for conf in /etc/wireguard/*.conf; do
+                    [ -f "$conf" ] && wg-quick down "$conf" 2>/dev/null && _ok "WireGuard gestoppt" || true
+                done
+            fi
+            ;;
+
+        login)
+            local authkey="${1:-}"
+            _head "Tailscale Login"
+            if [ -n "$authkey" ]; then
+                tailscale up --authkey "$authkey" --hostname gl-e5800-obd \
+                    --accept-routes --accept-dns=false 2>&1
+            else
+                tailscale up --hostname gl-e5800-obd --accept-routes --accept-dns=false 2>&1
+            fi
+            sleep 2
+            tailscale status 2>/dev/null || true
+            ;;
+
+        logout)
+            tailscale logout 2>/dev/null && _ok "Tailscale ausgeloggt" || \
+                _warn "Tailscale logout fehlgeschlagen"
+            ;;
+
+        ip)    tailscale ip 2>/dev/null || _fail "Tailscale nicht verbunden" ;;
+        peers) _head "Tailscale Peers"; tailscale status 2>/dev/null || _fail "Tailscale nicht verbunden" ;;
+
+        subnet)
+            _head "Subnet-Routing: 192.168.10.0/24 exponieren"
+            tailscale up --advertise-routes=192.168.10.0/24 \
+                --accept-routes --accept-dns=false 2>&1 && \
+                _ok "Subnet exponiert" || _warn "Fehler beim Subnet-Routing"
+            _warn "Routes im Admin-Panel bestätigen: https://login.tailscale.com/admin/machines"
+            ;;
+
+        config)
+            local src="$1"
+            [ -n "$src" ] || { _fail "vpn config: Pfad zur .conf-Datei angeben"; return 1; }
+            mkdir -p /etc/wireguard
+            cp "$src" "/etc/wireguard/$(basename "$src")"
+            chmod 600 "/etc/wireguard/$(basename "$src")"
+            _ok "WireGuard-Config: /etc/wireguard/$(basename "$src")"
+            _warn "Starten: obd-ctl vpn start"
+            ;;
+
+        *)
+            echo "vpn: Unbekannter Unterbefehl: $subcmd"
+            echo "  Tailscale: status | start | stop | login [KEY] | logout | ip | peers | subnet"
+            echo "  WireGuard: start | stop | config FILE"
+            ;;
+    esac
+}
+
+# ── display ───────────────────────────────────────────────────────────────────
+cmd_display() {
+    local subcmd="${1:-status}"
+
+    case "$subcmd" in
+        next)
+            SCREEN_FILE="/tmp/obd-display-screen"
+            current=$(cat "$SCREEN_FILE" 2>/dev/null || echo 0)
+            next=$(( (current + 1) % 4 ))
+            echo "$next" > "$SCREEN_FILE"
+            _ok "Display-Screen → $next (wird beim nächsten Refresh übernommen)"
+            ;;
+        off)
+            /etc/init.d/obd-display stop 2>/dev/null || true
+            # gl_screen optional auf E5800
+            [ -f /etc/init.d/gl_screen ] && /etc/init.d/gl_screen stop 2>/dev/null || true
+            dd if=/dev/zero of=/dev/fb0 bs=1024 count=200 2>/dev/null || true
+            _ok "Display ausgeschaltet (schwarzer Bildschirm)"
+            ;;
+        on)
+            if [ -f /etc/init.d/gl_screen ]; then
+                /etc/init.d/gl_screen start 2>/dev/null && _ok "gl_screen gestartet" || \
+                    _warn "gl_screen start fehlgeschlagen"
+            else
+                _warn "gl_screen nicht vorhanden (GL-E5800 GL.iNet-Display-Service)"
+                _warn "OBD-Display starten: obd-ctl display obd"
+            fi
+            ;;
+        obd)
+            [ -f /etc/init.d/gl_screen ] && /etc/init.d/gl_screen stop 2>/dev/null || true
+            sleep 1
+            /etc/init.d/obd-display restart 2>/dev/null && _ok "OBD-Display gestartet"
+            ;;
+        status)
+            printf "  obd-display: "; _svc_state obd-display; echo ""
+            if [ -f /etc/init.d/gl_screen ]; then
+                printf "  gl_screen:   "; _svc_state gl_screen; echo ""
+            else
+                printf "  gl_screen:   ${GRAY}nicht installiert${N}\n"
+            fi
+            # Display-Auflösung anzeigen
+            if [ -f /sys/class/graphics/fb0/virtual_size ]; then
+                res=$(cat /sys/class/graphics/fb0/virtual_size)
+                printf "  Auflösung:   %s px\n" "$res"
+            fi
+            ;;
+        *)
+            echo "display: Unbekannter Unterbefehl: $subcmd"
+            echo "  Gültig: next | off | on | obd | status"
+            ;;
+    esac
+}
+
+# ── info ──────────────────────────────────────────────────────────────────────
+cmd_info() {
+    _head "Geräteinformationen — GL-E5800 (Mudi 7)"
+    echo "  Hostname:  $(cat /proc/sys/kernel/hostname 2>/dev/null)"
+    echo "  Uptime:    $(cat /proc/uptime 2>/dev/null | awk '{printf "%dd %dh %dm", $1/86400, ($1%86400)/3600, ($1%3600)/60}')"
+    echo "  CPU:       $(grep 'model name' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs)"
+    echo "  RAM frei:  $(free 2>/dev/null | awk '/^Mem:/ {printf "%.0f MB / %.0f MB", $4/1024, $2/1024}')"
+    echo "  eMMC (/):  $(df -h / 2>/dev/null | tail -1 | awk '{print $4 " frei von " $2}')"
+    # OBD-venv Größe
+    if [ -d /opt/obd-venv ]; then
+        venv_size=$(du -sh /opt/obd-venv 2>/dev/null | awk '{print $1}')
+        echo "  venv:      ${venv_size} (/opt/obd-venv)"
+    fi
+    echo "  Akku:      $(cat /sys/class/power_supply/battery/capacity 2>/dev/null || echo 'N/A')%"
+    echo "  Kernel:    $(uname -r)"
+    echo "  OpenWrt:   $(cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_RELEASE | cut -d= -f2 | tr -d '"')"
+    echo "  Display:   $(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 'N/A')"
+    echo ""
+}
+
+# ── Hilfe ─────────────────────────────────────────────────────────────────────
+cmd_help() {
+    echo ""
+    echo -e "${B}obd-ctl — GL-E5800 (Mudi 7) Management CLI${N}"
+    echo ""
+    echo "BEFEHLE:"
+    echo "  status              Kompakte Übersicht"
+    echo "  start/stop/restart  [all|obd|display|usbipd|vpn]"
+    echo "  enable/disable      [svc] Autostart"
+    echo "  logs [n]            Letzte n Logzeilen (Standard: 50)"
+    echo "  follow              Live-Logs"
+    echo "  obd                 OBD2 Live-Daten"
+    echo "  dtcs                Fehlercodes lesen"
+    echo "  clear-dtcs          Fehlercodes löschen"
+    echo "  bind / unbind       Adapter USB/IP (adapter.conf)"
+    echo "  usbip               USB/IP Status"
+    echo "  adapter             Adapter-Konfiguration anzeigen"
+    echo "  ip                  Netzwerk-IPs + 5G"
+    echo "  wifi [SSID PW]      WiFi Status/Konfiguration"
+    echo "  modem [status|enable|disable]   5G-Modem"
+    echo "  vpn status|start|stop|config FILE"
+    echo "  display next|off|on|obd|status"
+    echo "  info                Geräteinformationen (inkl. eMMC, Akku)"
+    echo ""
+}
+
+# ── Dispatcher ────────────────────────────────────────────────────────────────
+CMD="${1:-help}"; shift 2>/dev/null || true
+
+case "$CMD" in
+    status)       cmd_status ;;
+    start)        cmd_service start  "$@" ;;
+    stop)         cmd_service stop   "$@" ;;
+    restart)      cmd_service restart "$@" ;;
+    enable)       cmd_service enable "$@" ;;
+    disable)      cmd_service disable "$@" ;;
+    logs)         cmd_logs "$@" ;;
+    follow)       cmd_follow ;;
+    obd)          cmd_obd ;;
+    dtcs)         cmd_dtcs ;;
+    clear-dtcs)   cmd_clear_dtcs ;;
+    bind)         cmd_bind ;;
+    unbind)       cmd_unbind ;;
+    usbip)        cmd_usbip ;;
+    adapter)      cmd_adapter ;;
+    ip)           cmd_ip ;;
+    wifi)         cmd_wifi "$@" ;;
+    modem)        cmd_modem "$@" ;;
+    vpn)          cmd_vpn "$@" ;;
+    display)      cmd_display "$@" ;;
+    info)         cmd_info ;;
+    help|--help)  cmd_help ;;
+    *)            echo "Unbekannter Befehl: $CMD"; cmd_help; exit 1 ;;
+esac

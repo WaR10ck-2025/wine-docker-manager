@@ -1,0 +1,50 @@
+#!/bin/sh /etc/rc.common
+# ─────────────────────────────────────────────────────────────────────────────
+# OBD2 Monitor — OpenWrt procd Service
+# GL.iNet GL-BE3600 (Slate 7)
+#
+# Installation:
+#   cp obd-monitor /etc/init.d/obd-monitor
+#   chmod +x /etc/init.d/obd-monitor
+#   /etc/init.d/obd-monitor enable
+#   /etc/init.d/obd-monitor start
+#
+# Logs: logread | grep -i obd
+# ─────────────────────────────────────────────────────────────────────────────
+
+USE_PROCD=1
+START=95
+STOP=10
+
+INSTALL_DIR="/opt/obd-monitor"
+USB_PKG_DIR="/mnt/usb/obd-pkgs"
+
+start_service() {
+    # Sicherstellen dass USB-Stick gemountet ist
+    if [ ! -d "$USB_PKG_DIR" ]; then
+        logger -t obd-monitor "WARNUNG: $USB_PKG_DIR nicht verfügbar — USB-Stick gemountet?"
+    fi
+
+    procd_open_instance
+    procd_set_param env PYTHONPATH="$USB_PKG_DIR"
+    procd_set_param command /usr/bin/python3 -m uvicorn obd_service:app \
+        --host 0.0.0.0 \
+        --port 8765 \
+        --workers 1 \
+        --log-level warning
+    procd_set_param dir "$INSTALL_DIR"
+    # Auto-Restart: max 5 Neustarts in 3600s, 5s Wartezeit
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service() {
+    logger -t obd-monitor "Service gestoppt"
+}
+
+service_triggers() {
+    # Automatisch starten wenn USB-Stick gemountet wird
+    procd_add_interface_trigger "interface.*" "" /etc/init.d/obd-monitor restart
+}

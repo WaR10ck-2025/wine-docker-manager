@@ -1,0 +1,391 @@
+#!/bin/sh
+# ═══════════════════════════════════════════════════════════════════════════════
+# obd-ctl — GL.iNet GL-BE10000 (Slate 7 Pro) Management-CLI
+# ⚠️ PROTOTYPE — TODO: verify on hardware
+#
+# Wird auf dem Router unter /usr/local/bin/obd-ctl deployt.
+#
+# VERWENDUNG:
+#   obd-ctl BEFEHL [ARGUMENTE]
+#
+# BEFEHLE:
+#   status              Kompakte Übersicht
+#   start/stop/restart  [all | obd | display | usbipd | vpn]
+#   enable/disable      [svc] Autostart
+#   logs [n]            Letzte n Logzeilen (Standard: 50)
+#   follow              Logs live
+#   obd                 OBD2 Live-Daten
+#   dtcs                Fehlercodes lesen
+#   clear-dtcs          Fehlercodes löschen
+#   bind / unbind       Adapter USB/IP (adapter.conf)
+#   usbip               USB/IP Status
+#   adapter             Adapter-Konfiguration
+#   ip                  Netzwerk-IPs
+#   wifi [SSID PW]      WiFi Status/Konfiguration
+#   vpn status|start|stop|login [KEY]
+#   display next|off|on|obd|status
+#   info                Geräteinformationen
+# ═══════════════════════════════════════════════════════════════════════════════
+
+INSTALL_DIR="/opt/obd-monitor"
+VENV_DIR="/opt/obd-venv"
+OBD_API="http://127.0.0.1:8765"
+
+B='\033[1m'
+G='\033[0;32m'
+Y='\033[1;33m'
+R='\033[0;31m'
+C='\033[0;36m'
+N='\033[0m'
+GRAY='\033[0;37m'
+
+_ok()   { printf "${G}  ✓${N} %s\n" "$1"; }
+_fail() { printf "${R}  ✗${N} %s\n" "$1"; }
+_warn() { printf "${Y}  !${N} %s\n" "$1"; }
+_head() { printf "\n${B}${C}── %s${N}\n" "$1"; }
+
+_load_adapter() {
+    ADAPTER_VENDOR="0403"
+    ADAPTER_PRODUCT="d6da"
+    ADAPTER_NAME="Autocom CDP+"
+    [ -f /etc/obd-adapter.conf ] && . /etc/obd-adapter.conf
+}
+
+_svc_state() {
+    local svc="$1"
+    if [ ! -f "/etc/init.d/$svc" ]; then
+        printf "${GRAY}nicht installiert${N}"
+        return
+    fi
+    if pgrep -f "$svc" >/dev/null 2>&1 || \
+       /etc/init.d/"$svc" status 2>/dev/null | grep -qi 'running'; then
+        printf "${G}läuft${N}"
+    else
+        printf "${R}gestoppt${N}"
+    fi
+}
+
+_obd_json() {
+    curl -s --max-time 3 "$OBD_API/$1" 2>/dev/null
+}
+
+# ── status ────────────────────────────────────────────────────────────────────
+cmd_status() {
+    _load_adapter
+    echo ""
+    printf "${B}${C}╔══════════════════════════════════╗\n"
+    printf "║  GL-BE10000 OBD Status [PROTO]   ║\n"
+    printf "╚══════════════════════════════════╝${N}\n"
+
+    _head "Services"
+    for svc in usbipd obd-monitor obd-display; do
+        state=$(_svc_state "$svc")
+        printf "  %-14s %b\n" "$svc" "$state"
+    done
+    [ -f /etc/init.d/gl_screen ] && {
+        state=$(_svc_state "gl_screen")
+        printf "  %-14s %b\n" "gl_screen" "$state"
+    }
+
+    if command -v tailscale >/dev/null 2>&1; then
+        ts_ip=$(tailscale ip 2>/dev/null | head -1)
+        [ -n "$ts_ip" ] && \
+            printf "  %-14s %b\n" "vpn (ts)" "${G}aktiv${N}" || \
+            printf "  %-14s %b\n" "vpn (ts)" "${GRAY}getrennt${N}"
+    fi
+
+    _head "Netzwerk"
+    for iface in br-lan wlan0 eth0 wg0; do
+        ip_addr=$(ip addr show "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | head -1)
+        [ -n "$ip_addr" ] && printf "  %-8s %s\n" "$iface" "$ip_addr"
+    done
+    wifi_ssid=$(iwinfo wlan0 info 2>/dev/null | grep 'ESSID' | awk -F'"' '{print $2}')
+    [ -n "$wifi_ssid" ] && printf "  WiFi-SSID: %s\n" "$wifi_ssid"
+
+    _head "USB / $ADAPTER_NAME"
+    if command -v usbip >/dev/null 2>&1; then
+        adapter=$(usbip list -l 2>/dev/null | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" || echo '')
+        if [ -n "$adapter" ]; then
+            _ok "$ADAPTER_NAME erkannt"
+            bound=$(usbip list -l 2>/dev/null | grep -A1 "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" | grep -c 'usbip-host' || true)
+            [ "$bound" -gt 0 ] && _ok "Gebunden (USB/IP)" || _warn "Nicht gebunden"
+        else
+            _fail "$ADAPTER_NAME nicht erkannt (${ADAPTER_VENDOR}:${ADAPTER_PRODUCT})"
+        fi
+    else
+        _warn "usbip nicht installiert"
+    fi
+
+    _head "OBD2"
+    obd_json=$(_obd_json "obd/status")
+    if [ -n "$obd_json" ]; then
+        connected=$(echo "$obd_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('connected',''))" 2>/dev/null)
+        proto=$(echo "$obd_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('protocol','') or '-')" 2>/dev/null)
+        if [ "$connected" = "True" ]; then
+            _ok "Verbunden: $proto"
+        else
+            err_msg=$(echo "$obd_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','') or '')" 2>/dev/null)
+            _fail "Nicht verbunden${err_msg:+: $err_msg}"
+        fi
+    else
+        _fail "OBD-API nicht erreichbar"
+    fi
+
+    echo ""
+    _warn "PROTOTYPE — TODO: verify on hardware"
+    echo ""
+}
+
+# ── start/stop/restart/enable/disable ─────────────────────────────────────────
+cmd_service() {
+    local action="$1"
+    local svc="${2:-all}"
+
+    _svcs() {
+        case "$svc" in
+            all) echo "usbipd obd-monitor obd-display" ;;
+            obd) echo "obd-monitor" ;;
+            display) echo "obd-display" ;;
+            *) echo "$svc" ;;
+        esac
+    }
+
+    for s in $(_svcs); do
+        if [ -f "/etc/init.d/$s" ]; then
+            /etc/init.d/"$s" "$action" 2>/dev/null && \
+                _ok "$s: $action" || _warn "$s: $action (Fehler?)"
+        else
+            _warn "$s nicht installiert"
+        fi
+    done
+}
+
+cmd_logs()   { logread | tail -"${1:-50}"; }
+cmd_follow() { logread -f; }
+
+cmd_obd() {
+    _head "OBD2 Status"
+    curl -s --max-time 3 "$OBD_API/obd/status" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    print('  Verbunden:  '+str(d.get('connected','-')))
+    print('  Protokoll:  '+str(d.get('protocol') or '-'))
+    e=d.get('error')
+    if e: print('  Fehler:     '+str(e))
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+
+    _head "OBD2 Live-Daten"
+    curl -s --max-time 3 "$OBD_API/obd/data" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    def f(k,fmt,u): v=d.get(k); return fmt.format(v)+u if v is not None else '---'
+    print('  RPM:          '+f('rpm',           '{:.0f}', ' rpm'))
+    print('  Speed:        '+f('speed',          '{:.0f}', ' km/h'))
+    print('  Coolant:      '+f('coolant_temp',   '{:.0f}', ' °C'))
+    print('  Battery:      '+f('battery_voltage','{:.1f}', ' V'))
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+    echo ""
+}
+
+cmd_dtcs() {
+    _head "Fehlercodes (DTCs)"
+    curl -s --max-time 3 "$OBD_API/obd/dtcs" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    codes=d.get('codes',[])
+    if codes:
+        for c in codes: print('  '+c.get('code','-')+': '+c.get('description','-'))
+    else:
+        print('  Keine Fehlercodes gespeichert')
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+}
+
+cmd_clear_dtcs() {
+    printf "Fehlercodes löschen? [j/N] "
+    read -r ans
+    [ "$ans" = "j" ] || [ "$ans" = "J" ] || { echo "Abgebrochen."; return; }
+    curl -s -X POST --max-time 5 "$OBD_API/obd/clear-dtcs" | python3 -c "
+import sys,json
+try: d=json.load(sys.stdin); print('  '+str(d.get('message',d)))
+except: sys.stdout.write(sys.stdin.read())
+" 2>/dev/null
+}
+
+cmd_bind() {
+    _load_adapter
+    _head "$ADAPTER_NAME binden"
+    BID=$(usbip list -l 2>/dev/null | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" | grep -o 'busid [^ ]*' | awk '{print $2}' | head -1)
+    if [ -n "$BID" ]; then
+        usbip bind -b "$BID" && _ok "Gebunden: $BID" || _warn "Bind fehlgeschlagen"
+    else
+        _fail "Nicht gefunden. Eingesteckt? lsusb:"
+        lsusb 2>/dev/null | head -10
+    fi
+}
+
+cmd_unbind() {
+    _load_adapter
+    BID=$(usbip list -l 2>/dev/null | grep "${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}" | grep -o 'busid [^ ]*' | awk '{print $2}' | head -1)
+    [ -n "$BID" ] && usbip unbind -b "$BID" && _ok "Freigegeben: $BID" || _warn "Nicht gebunden"
+}
+
+cmd_usbip() {
+    _head "USB/IP Status"
+    usbip list -l 2>/dev/null || _warn "usbip nicht verfügbar"
+}
+
+cmd_adapter() {
+    _load_adapter
+    _head "Adapter-Konfiguration"
+    echo "  Name:     $ADAPTER_NAME"
+    echo "  VID:PID:  ${ADAPTER_VENDOR}:${ADAPTER_PRODUCT}"
+    [ -f /etc/obd-adapter.conf ] && _ok "/etc/obd-adapter.conf" || _warn "Standard CDP+ (keine adapter.conf)"
+}
+
+cmd_ip() {
+    _head "Netzwerk-Interfaces"
+    ip addr show 2>/dev/null | grep -E 'inet |^[0-9]+:' | grep -v '127.0.0.1'
+    _head "Routen"
+    ip route 2>/dev/null
+    _head "WiFi"
+    iwinfo wlan0 info 2>/dev/null || echo "  (iwinfo nicht verfügbar)"
+    echo ""
+}
+
+cmd_wifi() {
+    if [ -z "$1" ]; then
+        _head "WiFi-Status"
+        iwinfo 2>/dev/null || ip link show wlan0 2>/dev/null
+    else
+        local ssid="$1"; local pass="${2:-}"
+        uci set wireless.wifinet_sta.ssid="$ssid"
+        [ -n "$pass" ] && uci set wireless.wifinet_sta.key="$pass"
+        uci commit wireless
+        wifi reload
+        _ok "WiFi konfiguriert: $ssid"
+    fi
+}
+
+cmd_vpn() {
+    local subcmd="${1:-status}"; shift 2>/dev/null || true
+    case "$subcmd" in
+        status)
+            _head "VPN Status"
+            command -v tailscale >/dev/null 2>&1 && tailscale status 2>/dev/null || \
+                command -v wg >/dev/null 2>&1 && wg show 2>/dev/null || \
+                _warn "Kein VPN installiert"
+            ;;
+        start)
+            command -v tailscale >/dev/null 2>&1 && \
+                tailscale up --accept-routes 2>/dev/null && _ok "Tailscale verbunden" || true ;;
+        stop)
+            command -v tailscale >/dev/null 2>&1 && tailscale down 2>/dev/null || true ;;
+        login)
+            local authkey="${1:-}"
+            [ -n "$authkey" ] && \
+                tailscale up --authkey "$authkey" --hostname gl-be10000-obd --accept-routes --accept-dns=false 2>&1 || \
+                tailscale up --hostname gl-be10000-obd --accept-routes --accept-dns=false 2>&1 ;;
+        *) echo "vpn: status | start | stop | login [KEY]" ;;
+    esac
+}
+
+cmd_display() {
+    local subcmd="${1:-status}"
+    case "$subcmd" in
+        next)
+            SCREEN_FILE="/tmp/obd-display-screen"
+            current=$(cat "$SCREEN_FILE" 2>/dev/null || echo 0)
+            next=$(( (current + 1) % 4 ))
+            echo "$next" > "$SCREEN_FILE"
+            _ok "Display-Screen → $next"
+            ;;
+        off)
+            /etc/init.d/obd-display stop 2>/dev/null || true
+            [ -f /etc/init.d/gl_screen ] && /etc/init.d/gl_screen stop 2>/dev/null || true
+            dd if=/dev/zero of=/dev/fb0 bs=1024 count=200 2>/dev/null || true
+            _ok "Display ausgeschaltet"
+            ;;
+        on)
+            if [ -f /etc/init.d/gl_screen ]; then
+                /etc/init.d/gl_screen start && _ok "gl_screen gestartet" || true
+            else
+                _warn "gl_screen nicht vorhanden — obd-ctl display obd nutzen"
+            fi
+            ;;
+        obd)
+            [ -f /etc/init.d/gl_screen ] && /etc/init.d/gl_screen stop 2>/dev/null || true
+            sleep 1
+            /etc/init.d/obd-display restart && _ok "OBD-Display gestartet (320×240)"
+            ;;
+        status)
+            printf "  obd-display: "; _svc_state obd-display; echo ""
+            [ -f /etc/init.d/gl_screen ] && {
+                printf "  gl_screen:   "; _svc_state gl_screen; echo ""
+            }
+            [ -f /sys/class/graphics/fb0/virtual_size ] && \
+                printf "  Auflösung:   %s px (TODO: verify)\n" "$(cat /sys/class/graphics/fb0/virtual_size)"
+            ;;
+        *) echo "display: next|off|on|obd|status" ;;
+    esac
+}
+
+cmd_info() {
+    _head "Geräteinformationen — GL-BE10000 (Slate 7 Pro) [PROTOTYPE]"
+    echo "  Hostname:  $(cat /proc/sys/kernel/hostname 2>/dev/null)"
+    echo "  Uptime:    $(cat /proc/uptime 2>/dev/null | awk '{printf "%dd %dh %dm", $1/86400, ($1%86400)/3600, ($1%3600)/60}')"
+    echo "  CPU:       $(grep 'model name' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | xargs)"
+    echo "  RAM frei:  $(free 2>/dev/null | awk '/^Mem:/ {printf "%.0f MB / %.0f MB", $4/1024, $2/1024}')"
+    echo "  Flash (/): $(df -h / 2>/dev/null | tail -1 | awk '{print $4 " frei von " $2}')"
+    [ -d /opt/obd-venv ] && echo "  venv:      $(du -sh /opt/obd-venv 2>/dev/null | awk '{print $1}') (/opt/obd-venv)"
+    echo "  Kernel:    $(uname -r)"
+    echo "  OpenWrt:   $(cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_RELEASE | cut -d= -f2 | tr -d '"')"
+    echo "  Display:   $(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 'N/A (TODO: verify)')"
+    echo ""
+    _warn "PROTOTYPE — TODO: verify on hardware"
+}
+
+cmd_help() {
+    echo ""
+    echo -e "${B}obd-ctl — GL-BE10000 (Slate 7 Pro) [PROTOTYPE]${N}"
+    echo ""
+    echo "  status, start/stop/restart, enable/disable"
+    echo "  logs [n], follow, obd, dtcs, clear-dtcs"
+    echo "  bind, unbind, usbip, adapter"
+    echo "  ip, wifi [SSID PW], vpn status|start|stop|login"
+    echo "  display next|off|on|obd|status"
+    echo "  info"
+    echo ""
+}
+
+CMD="${1:-help}"; shift 2>/dev/null || true
+
+case "$CMD" in
+    status)       cmd_status ;;
+    start)        cmd_service start  "$@" ;;
+    stop)         cmd_service stop   "$@" ;;
+    restart)      cmd_service restart "$@" ;;
+    enable)       cmd_service enable "$@" ;;
+    disable)      cmd_service disable "$@" ;;
+    logs)         cmd_logs "$@" ;;
+    follow)       cmd_follow ;;
+    obd)          cmd_obd ;;
+    dtcs)         cmd_dtcs ;;
+    clear-dtcs)   cmd_clear_dtcs ;;
+    bind)         cmd_bind ;;
+    unbind)       cmd_unbind ;;
+    usbip)        cmd_usbip ;;
+    adapter)      cmd_adapter ;;
+    ip)           cmd_ip ;;
+    wifi)         cmd_wifi "$@" ;;
+    vpn)          cmd_vpn "$@" ;;
+    display)      cmd_display "$@" ;;
+    info)         cmd_info ;;
+    help|--help)  cmd_help ;;
+    *)            echo "Unbekannter Befehl: $CMD"; cmd_help; exit 1 ;;
+esac

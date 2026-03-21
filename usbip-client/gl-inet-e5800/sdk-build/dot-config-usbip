@@ -1,0 +1,17 @@
+# USB/IP Kernel-Module — Minimal-Config Overlay für GL-E5800 (Mudi 7)
+# Qualcomm Dragonwing X72 — ARM64
+# Wird per `cat dot-config-usbip >> .config` in den SDK-Build integriert.
+
+# USB/IP Core + Host-Export
+CONFIG_USBIP_CORE=m
+CONFIG_USBIP_HOST=m
+
+# USB-Serial (FTDI — für Autocom CDP+ 0403:d6da)
+CONFIG_USB_SERIAL=m
+CONFIG_USB_SERIAL_FTDI_SIO=m
+
+# USB/IP Tools (userspace: usbip, usbipd)
+CONFIG_PACKAGE_usbip=y
+CONFIG_PACKAGE_usbip-server=y
+CONFIG_PACKAGE_kmod-usbip=y
+CONFIG_PACKAGE_kmod-usbip-host=y
