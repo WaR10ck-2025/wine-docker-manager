@@ -11,17 +11,22 @@ Start:
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
+from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from protocols.base import DTC, OBDReading
 from protocols.elm327 import ELM327Protocol, probe as elm327_probe
 from protocols.iso9141 import ISO9141Protocol, _find_port
+
+OBD_TCP = os.environ.get("OBD_TCP")  # Format: "host:port" → wird zu socket://host:port
+STATIC_DIR = Path(__file__).parent / "static"
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -45,6 +50,20 @@ _lock = threading.Lock()
 def _connect_once():
     """Verbindet beim Service-Start (läuft im Background-Thread)."""
     global _proto, _port, _error
+
+    # TCP-Pfad (OBD_TCP=host:port) — skippt serial probe, geht direkt ueber ELM327 socket://
+    if OBD_TCP:
+        target = f"socket://{OBD_TCP}"
+        _port = target
+        proto = ELM327Protocol()
+        if proto.connect(target):
+            with _lock:
+                _proto = proto
+            log.info(f"ELM327 (TCP) verbunden auf {target}")
+            return
+        _error = f"Verbindung fehlgeschlagen auf {target}"
+        log.error(_error)
+        return
 
     target = _find_port()
     if not target:
@@ -176,3 +195,9 @@ async def obd_stream():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def dashboard():
+    """Web-Dashboard (statische HTML, konsumiert /obd/stream via SSE)."""
+    return FileResponse(STATIC_DIR / "dashboard.html")

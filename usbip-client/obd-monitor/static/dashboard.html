@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OBD2 Monitor</title>
+<style>
+  :root {
+    --bg: #0a0f14;
+    --card: #151c24;
+    --card-hi: #1e2732;
+    --text: #cbd5e1;
+    --muted: #64748b;
+    --accent: #4ade80;
+    --warn: #fbbf24;
+    --err: #ef4444;
+    --border: #1e2732;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 500;
+    margin: 0 0 4px 0;
+    letter-spacing: 0.5px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .status {
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: right;
+  }
+  .status .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--err);
+    transition: background 0.3s;
+  }
+  .status.connected .dot { background: var(--accent); }
+  .status .err-line { color: var(--err); margin-top: 4px; font-size: 12px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 10px;
+  }
+  .card .value {
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 30px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+  }
+  .card .unit {
+    font-size: 14px;
+    color: var(--muted);
+    margin-left: 4px;
+    font-weight: 400;
+  }
+  .card.accent .value { color: var(--accent); }
+  .card.warn .value { color: var(--warn); }
+  .card.stale .value { color: var(--muted); opacity: 0.5; }
+  .dtc-section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .dtc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .dtc-header h2 {
+    font-size: 14px;
+    font-weight: 500;
+    margin: 0;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+  }
+  .btn {
+    background: var(--card-hi);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    margin-left: 8px;
+    transition: all 0.15s;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.danger:hover { border-color: var(--err); color: var(--err); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .dtc-list { font-family: "SF Mono", Consolas, monospace; font-size: 13px; }
+  .dtc-list .empty { color: var(--muted); font-style: italic; }
+  .dtc-list .item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 14px;
+  }
+  .dtc-list .item:last-child { border-bottom: none; }
+  .dtc-list .code { color: var(--warn); font-weight: 600; min-width: 80px; }
+  .dtc-list .desc { color: var(--text); }
+  .footer {
+    margin-top: 24px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>OBD2 Monitor</h1>
+      <div style="font-size: 12px; color: var(--muted);">Live-Datenstrom via Server-Sent Events</div>
+    </div>
+    <div id="status" class="status">
+      <div><span class="dot"></span><span id="status-text">verbinde...</span></div>
+      <div id="status-detail"></div>
+      <div id="status-err" class="err-line" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card accent" data-field="rpm">
+      <div class="label">Drehzahl</div>
+      <div class="value">—<span class="unit">rpm</span></div>
+    </div>
+    <div class="card accent" data-field="speed">
+      <div class="label">Geschwindigkeit</div>
+      <div class="value">—<span class="unit">km/h</span></div>
+    </div>
+    <div class="card" data-field="coolant_temp">
+      <div class="label">Kühlmittel</div>
+      <div class="value">—<span class="unit">°C</span></div>
+    </div>
+    <div class="card" data-field="throttle">
+      <div class="label">Drosselklappe</div>
+      <div class="value">—<span class="unit">%</span></div>
+    </div>
+    <div class="card" data-field="engine_load">
+      <div class="label">Motorlast</div>
+      <div class="value">—<span class="unit">%</span></div>
+    </div>
+    <div class="card" data-field="battery_voltage">
+      <div class="label">Bordspannung</div>
+      <div class="value">—<span class="unit">V</span></div>
+    </div>
+    <div class="card" data-field="short_fuel_trim">
+      <div class="label">STFT Bank 1</div>
+      <div class="value">—<span class="unit">%</span></div>
+    </div>
+    <div class="card" data-field="long_fuel_trim">
+      <div class="label">LTFT Bank 1</div>
+      <div class="value">—<span class="unit">%</span></div>
+    </div>
+  </div>
+
+  <div class="dtc-section">
+    <div class="dtc-header">
+      <h2>Fehlercodes (DTCs)</h2>
+      <div>
+        <button id="btn-read" class="btn">Lesen</button>
+        <button id="btn-clear" class="btn danger">Löschen</button>
+      </div>
+    </div>
+    <div id="dtc-list" class="dtc-list">
+      <div class="empty">— nicht gelesen —</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span id="last-update">noch keine Daten</span>
+  </div>
+
+<script>
+(function() {
+  const FIELD_FORMAT = {
+    rpm:              v => v == null ? "—" : Math.round(v),
+    speed:            v => v == null ? "—" : Math.round(v),
+    coolant_temp:     v => v == null ? "—" : Math.round(v),
+    throttle:         v => v == null ? "—" : v.toFixed(1),
+    engine_load:      v => v == null ? "—" : v.toFixed(1),
+    battery_voltage:  v => v == null ? "—" : v.toFixed(2),
+    short_fuel_trim:  v => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(1),
+    long_fuel_trim:   v => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(1),
+  };
+
+  const statusEl     = document.getElementById("status");
+  const statusText   = document.getElementById("status-text");
+  const statusDetail = document.getElementById("status-detail");
+  const statusErr    = document.getElementById("status-err");
+  const lastUpdate   = document.getElementById("last-update");
+  const dtcList      = document.getElementById("dtc-list");
+  const btnRead      = document.getElementById("btn-read");
+  const btnClear     = document.getElementById("btn-clear");
+
+  function applyReading(data) {
+    document.querySelectorAll(".card[data-field]").forEach(card => {
+      const field = card.dataset.field;
+      const val = data[field];
+      const valueEl = card.querySelector(".value");
+      const unitEl = valueEl.querySelector(".unit");
+      const unit = unitEl ? unitEl.outerHTML : "";
+      valueEl.innerHTML = FIELD_FORMAT[field](val) + unit;
+      card.classList.toggle("stale", val == null);
+    });
+    if (data.timestamp_ms) {
+      const d = new Date(data.timestamp_ms);
+      lastUpdate.textContent = "zuletzt: " + d.toLocaleTimeString("de-DE");
+    }
+  }
+
+  async function refreshStatus() {
+    try {
+      const r = await fetch("/obd/status");
+      const s = await r.json();
+      statusEl.classList.toggle("connected", !!s.connected);
+      statusText.textContent = s.connected ? "verbunden" : "getrennt";
+      statusDetail.textContent = s.connected
+        ? `${s.protocol || "?"} @ ${s.port || "?"}`
+        : "";
+      if (s.error) {
+        statusErr.style.display = "block";
+        statusErr.textContent = s.error;
+      } else {
+        statusErr.style.display = "none";
+      }
+    } catch (e) {
+      statusEl.classList.remove("connected");
+      statusText.textContent = "Service nicht erreichbar";
+    }
+  }
+
+  function startStream() {
+    const es = new EventSource("/obd/stream");
+    es.onmessage = evt => {
+      try { applyReading(JSON.parse(evt.data)); } catch {}
+    };
+    es.onerror = () => {
+      // Browser reconnectet automatisch — Status neu pollen, um Fehler zu zeigen
+      refreshStatus();
+    };
+  }
+
+  function renderDtcs(codes) {
+    if (!codes || codes.length === 0) {
+      dtcList.innerHTML = '<div class="empty">keine Fehlercodes gespeichert</div>';
+      return;
+    }
+    dtcList.innerHTML = codes.map(c =>
+      `<div class="item"><div class="code">${c.code}</div><div class="desc">${c.description || "(keine Beschreibung)"}</div></div>`
+    ).join("");
+  }
+
+  btnRead.addEventListener("click", async () => {
+    btnRead.disabled = true;
+    btnRead.textContent = "lese...";
+    try {
+      const r = await fetch("/obd/dtcs");
+      const data = await r.json();
+      renderDtcs(data.codes);
+    } catch (e) {
+      dtcList.innerHTML = `<div class="empty">Fehler: ${e.message}</div>`;
+    } finally {
+      btnRead.disabled = false;
+      btnRead.textContent = "Lesen";
+    }
+  });
+
+  btnClear.addEventListener("click", async () => {
+    if (!confirm("Wirklich alle Fehlercodes löschen? (Mode 04)")) return;
+    btnClear.disabled = true;
+    btnClear.textContent = "lösche...";
+    try {
+      const r = await fetch("/obd/clear-dtcs", { method: "POST" });
+      const data = await r.json();
+      alert(data.message || (data.success ? "OK" : "Fehler"));
+      if (data.success) renderDtcs([]);
+    } finally {
+      btnClear.disabled = false;
+      btnClear.textContent = "Löschen";
+    }
+  });
+
+  refreshStatus();
+  setInterval(refreshStatus, 5000);
+  startStream();
+})();
+</script>
+</body>
+</html>

@@ -64,14 +64,16 @@ echo "      Pakete installiert ✓"
 
 # ── 4. Dateien kopieren ──────────────────────────────────────────────────────
 echo "[4/5] Kopiere Dateien nach $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR/protocols"
+mkdir -p "$INSTALL_DIR/protocols" "$INSTALL_DIR/static"
 
 cp "$SCRIPT_DIR/obd_monitor.py"    "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/obd_service.py"    "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/uds_client.py"     "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/protocols/__init__.py" "$INSTALL_DIR/protocols/"
 cp "$SCRIPT_DIR/protocols/base.py"     "$INSTALL_DIR/protocols/"
 cp "$SCRIPT_DIR/protocols/elm327.py"   "$INSTALL_DIR/protocols/"
 cp "$SCRIPT_DIR/protocols/iso9141.py"  "$INSTALL_DIR/protocols/"
+cp "$SCRIPT_DIR/static/dashboard.html" "$INSTALL_DIR/static/"
 
 # Symlink für bequemen SSH-Zugriff
 ln -sf "$INSTALL_DIR/obd_monitor.py" /usr/local/bin/obd-monitor 2>/dev/null || true
@@ -104,6 +106,13 @@ echo ""
 echo "  HTTP API auf Port 8765:"
 echo "    curl http://${IP:-<ip>}:8765/obd/status"
 echo "    curl http://${IP:-<ip>}:8765/obd/data"
+echo ""
+echo "  Web-Dashboard:"
+echo "    http://${IP:-<ip>}:8765/"
+echo ""
+echo "  TCP-Mode aktivieren (z.B. ELM327-Simulator auf LXC 213):"
+echo "    echo 'OBD_TCP=192.168.10.213:35000' > /etc/obd-monitor.env"
+echo "    systemctl restart obd-monitor"
 echo ""
 echo "  SSH Terminal-Dashboard:"
 echo "    python3 $INSTALL_DIR/obd_monitor.py"
