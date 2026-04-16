@@ -17,7 +17,9 @@ State-Machine (single-client Lab, daher module-globale State):
 Seed->Key:
   key = seed XOR 0xDEADBEEF  (Lab-Platzhalter; echter OEM-Algo erst T3)
 """
+import argparse
 import logging
+import os
 import secrets
 import signal
 import struct
@@ -59,7 +61,37 @@ NRC_EXCEEDED_ATTEMPTS        = 0x36
 NRC_SVC_NOT_SUPPORTED        = 0x11
 
 # ── Security ───────────────────────────────────────────────────────────────
-KEY_MASK = 0xDEADBEEF
+# Seed→Key-Algo-Registry. Jeder Algo: (name, fn: bytes -> bytes).
+# Echte OEM-Algos kommen als Windows-J2534-DLL (Bosch/Volvo/VAG) — hier als
+# Python-Callables fuer Lab. Die Signatur ist identisch: 4-byte seed -> 4-byte key.
+KEY_MASK_DEFAULT = 0xDEADBEEF
+
+def _algo_xor_deadbeef(seed: bytes) -> bytes:
+    """T2-Default: key = seed XOR 0xDEADBEEF."""
+    return (int.from_bytes(seed, "big") ^ KEY_MASK_DEFAULT).to_bytes(4, "big")
+
+def _algo_volvo_vcc_mock(seed: bytes) -> bytes:
+    """Volvo VCC Mock: Rotate-Left-1 + XOR 0xA5A55A5A. Platzhalter fuer echten VCC-Algo."""
+    s = int.from_bytes(seed, "big") & 0xFFFFFFFF
+    rotated = ((s << 1) | (s >> 31)) & 0xFFFFFFFF
+    return (rotated ^ 0xA5A55A5A).to_bytes(4, "big")
+
+def _algo_vag_kw1281_mock(seed: bytes) -> bytes:
+    """VAG KW1281 Mock: (seed * 0x1337 + 0xCAFE) mod 2^32. Platzhalter."""
+    s = int.from_bytes(seed, "big")
+    k = (s * 0x1337 + 0xCAFE) & 0xFFFFFFFF
+    return k.to_bytes(4, "big")
+
+SEED2KEY_ALGOS = {
+    "xor_deadbeef":   _algo_xor_deadbeef,
+    "volvo_vcc_mock": _algo_volvo_vcc_mock,
+    "vag_kw1281_mock": _algo_vag_kw1281_mock,
+}
+
+# Active algo — wird via CLI-Arg oder SEED2KEY_ALGO env-var gesetzt.
+_active_algo_name = "xor_deadbeef"
+_compute_key = SEED2KEY_ALGOS[_active_algo_name]
+
 MAX_FAILED = 3
 
 # ── State ──────────────────────────────────────────────────────────────────
@@ -130,8 +162,7 @@ def _handle_security(payload: bytes) -> bytes:
         key = payload[2:]
         if len(key) != 4:
             return neg(SID_SECURITY, NRC_LEN)
-        seed_int = int.from_bytes(_last_seed, "big")
-        expected = (seed_int ^ KEY_MASK).to_bytes(4, "big")
+        expected = _compute_key(_last_seed)
         if key == expected:
             _security_unlocked = True
             _failed_attempts = 0
@@ -198,10 +229,28 @@ def handle(payload: bytes) -> bytes:
     return neg(sid, NRC_SVC_NOT_SUPPORTED)
 
 
+def _parse_args():
+    p = argparse.ArgumentParser(description="UDS-Simulator (T1+T2+T3 Seed2Key-Registry)")
+    p.add_argument(
+        "--seed-algo",
+        default=os.environ.get("SEED2KEY_ALGO", "xor_deadbeef"),
+        choices=sorted(SEED2KEY_ALGOS.keys()),
+        help="Seed->Key-Algo. Env: SEED2KEY_ALGO. Default: xor_deadbeef",
+    )
+    p.add_argument("--channel", default="vcan0", help="CAN-Channel (default: vcan0)")
+    return p.parse_args()
+
+
 def main():
-    log.info("UDS-Simulator auf vcan0 startet (T1+T2)")
+    global _active_algo_name, _compute_key
+    args = _parse_args()
+    _active_algo_name = args.seed_algo
+    _compute_key = SEED2KEY_ALGOS[_active_algo_name]
+
+    log.info("UDS-Simulator auf %s startet (T1+T2+T3)", args.channel)
+    log.info("Seed2Key-Algo: %s", _active_algo_name)
     log.info(f"DIDs: {[f'0x{d:04X}' for d in DIDS]} | writable: {[f'0x{d:04X}' for d in WRITABLE_DIDS]}")
-    bus = can.Bus(interface="socketcan", channel="vcan0")
+    bus = can.Bus(interface="socketcan", channel=args.channel)
     addr = isotp.Address(
         addressing_mode=isotp.AddressingMode.Normal_11bits,
         rxid=0x7E0,

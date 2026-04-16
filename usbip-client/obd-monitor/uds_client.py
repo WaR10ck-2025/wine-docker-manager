@@ -33,7 +33,30 @@ from udsoncan import DidCodec
 
 log = logging.getLogger("uds-client")
 
-KEY_MASK = 0xDEADBEEF
+# ── Seed2Key-Algo-Registry (synchron zu udssim/uds_server.py) ───────────────
+KEY_MASK_DEFAULT = 0xDEADBEEF
+
+def _algo_xor_deadbeef(seed: bytes) -> bytes:
+    return (int.from_bytes(seed, "big") ^ KEY_MASK_DEFAULT).to_bytes(4, "big")
+
+def _algo_volvo_vcc_mock(seed: bytes) -> bytes:
+    s = int.from_bytes(seed, "big") & 0xFFFFFFFF
+    rotated = ((s << 1) | (s >> 31)) & 0xFFFFFFFF
+    return (rotated ^ 0xA5A55A5A).to_bytes(4, "big")
+
+def _algo_vag_kw1281_mock(seed: bytes) -> bytes:
+    s = int.from_bytes(seed, "big")
+    k = (s * 0x1337 + 0xCAFE) & 0xFFFFFFFF
+    return k.to_bytes(4, "big")
+
+SEED2KEY_ALGOS = {
+    "xor_deadbeef":   _algo_xor_deadbeef,
+    "volvo_vcc_mock": _algo_volvo_vcc_mock,
+    "vag_kw1281_mock": _algo_vag_kw1281_mock,
+}
+
+# Backward-compat: alter KEY_MASK-Name bleibt importierbar.
+KEY_MASK = KEY_MASK_DEFAULT
 
 
 def fixed_codec(length: int) -> DidCodec:
@@ -87,8 +110,9 @@ def parse_write_arg(arg: str) -> tuple[int, bytes]:
     return did, payload
 
 
-def unlock_security(client: Client) -> None:
-    """$10 03 Extended Session → $27 01 Request Seed → XOR-Key → $27 02 Send Key."""
+def unlock_security(client: Client, algo_name: str = "xor_deadbeef") -> None:
+    """$10 03 Extended Session → $27 01 Request Seed → Algo-Key → $27 02 Send Key."""
+    compute = SEED2KEY_ALGOS[algo_name]
     log.info("Session → Extended ($10 03)")
     client.change_session(0x03)
 
@@ -97,10 +121,8 @@ def unlock_security(client: Client) -> None:
     seed = bytes(resp.service_data.seed)
     log.info(f"Seed:  {seed.hex()}")
 
-    seed_int = int.from_bytes(seed, "big")
-    key_int = seed_int ^ KEY_MASK
-    key = key_int.to_bytes(4, "big")
-    log.info(f"Key:   {key.hex()}  (= seed XOR 0x{KEY_MASK:08X})")
+    key = compute(seed)
+    log.info(f"Key:   {key.hex()}  (via algo={algo_name})")
 
     log.info("Send Key ($27 02)")
     client.send_key(0x02, key)
@@ -121,7 +143,7 @@ def read_all(client: Client) -> list[tuple[str, str]]:
     return rows
 
 
-def do_write(client: Client, did: int, new_value: bytes) -> tuple[str, str]:
+def do_write(client: Client, did: int, new_value: bytes, algo_name: str = "xor_deadbeef") -> tuple[str, str]:
     """Unlock → Write → Re-Read. Liefert (alt, neu) als lesbare Strings."""
     if did not in DID_BY_ID:
         raise ValueError(f"DID 0x{did:04X} nicht in Registry")
@@ -137,7 +159,7 @@ def do_write(client: Client, did: int, new_value: bytes) -> tuple[str, str]:
     old_str = format_did(kind, old_raw)
 
     # Unlock-Flow
-    unlock_security(client)
+    unlock_security(client, algo_name)
 
     # Write
     log.info(f"Write 0x{did:04X} = {new_value.hex()} ({len(new_value)} bytes)")
@@ -155,18 +177,44 @@ def do_write(client: Client, did: int, new_value: bytes) -> tuple[str, str]:
     return old_str, new_str
 
 
+ADAPTER_PROFILES = {
+    # LXC-UDS-Simulator (Lab-Default, T1+T2)
+    "udssim":    {"host": "192.168.10.214", "port": 28700, "channel": "vcan0",
+                  "txid": 0x7E0, "rxid": 0x7E8, "stmin": 0, "blocksize": 0},
+    # WiCAN Pro am GL.iNet Router, SocketCAN-TCP auf Port 3333 (Pfad B, echtes Auto)
+    "wican-pro": {"host": "192.168.10.200", "port": 3333, "channel": "can0",
+                  "txid": 0x7E0, "rxid": 0x7E8, "stmin": 0, "blocksize": 0},
+    # Generisches TCP-Profil — alles explizit via CLI setzen
+    "tcp":       {"host": "",                "port": 3333, "channel": "can0",
+                  "txid": 0x7E0, "rxid": 0x7E8, "stmin": 0, "blocksize": 0},
+}
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--host",    default="192.168.10.214", help="socketcand-Host (LXC 214)")
-    p.add_argument("--port",    default=28700, type=int,   help="socketcand-TCP-Port")
-    p.add_argument("--channel", default="vcan0",           help="CAN-Channel im Server-Namespace")
-    p.add_argument("--txid",    default=0x7E0, type=lambda x: int(x, 0), help="Client->Server CAN-ID")
-    p.add_argument("--rxid",    default=0x7E8, type=lambda x: int(x, 0), help="Server->Client CAN-ID")
-    p.add_argument("--timeout", default=3.0, type=float,   help="UDS-Response-Timeout (s)")
+    p.add_argument("--adapter", default="udssim", choices=sorted(ADAPTER_PROFILES),
+                   help="Adapter-Profil. udssim=LXC Lab, wican-pro=WiCAN Pro am Router, tcp=generisch")
+    p.add_argument("--host",    default=None,       help="Override: socketcand-Host (Profil-default)")
+    p.add_argument("--port",    default=None, type=int, help="Override: socketcand-TCP-Port")
+    p.add_argument("--channel", default=None,       help="Override: CAN-Channel")
+    p.add_argument("--txid",    default=None, type=lambda x: int(x, 0), help="Override: Client->Server CAN-ID")
+    p.add_argument("--rxid",    default=None, type=lambda x: int(x, 0), help="Override: Server->Client CAN-ID")
+    p.add_argument("--timeout", default=3.0, type=float, help="UDS-Response-Timeout (s)")
+    p.add_argument("--seed-algo", default="xor_deadbeef", choices=sorted(SEED2KEY_ALGOS),
+                   help="Seed->Key-Algo (muss zum Server-Setup passen). Default: xor_deadbeef")
     p.add_argument("--write",   action="append", default=[],
                    help="DID=VALUE (ASCII) oder DID=hex:XXXX. Mehrfach moeglich.")
     p.add_argument("--debug",   action="store_true")
     args = p.parse_args()
+
+    # Profil laden + CLI-Overrides anwenden
+    profile = dict(ADAPTER_PROFILES[args.adapter])
+    for k in ("host", "port", "channel", "txid", "rxid"):
+        v = getattr(args, k)
+        if v is not None:
+            profile[k] = v
+    if not profile["host"]:
+        p.error(f"--adapter={args.adapter} hat keinen Default-Host; --host erforderlich")
 
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
@@ -175,21 +223,26 @@ def main():
     )
 
     writes = [parse_write_arg(w) for w in args.write]
+    compute_key = SEED2KEY_ALGOS[args.seed_algo]
 
-    log.info(f"Connect: socketcand://{args.host}:{args.port}/{args.channel}")
+    log.info("Adapter: %s → socketcand://%s:%d/%s (algo=%s)",
+             args.adapter, profile["host"], profile["port"], profile["channel"], args.seed_algo)
     bus = can.Bus(
         interface="socketcand",
-        host=args.host,
-        port=args.port,
-        channel=args.channel,
+        host=profile["host"],
+        port=profile["port"],
+        channel=profile["channel"],
     )
 
     addr = isotp.Address(
         addressing_mode=isotp.AddressingMode.Normal_11bits,
-        rxid=args.rxid,
-        txid=args.txid,
+        rxid=profile["rxid"],
+        txid=profile["txid"],
     )
-    stack = isotp.CanStack(bus=bus, address=addr)
+    stack = isotp.CanStack(
+        bus=bus, address=addr,
+        params={"stmin": profile["stmin"], "blocksize": profile["blocksize"]},
+    )
     conn = PythonIsoTpConnection(stack)
 
     config = {
@@ -197,9 +250,7 @@ def main():
         "exception_on_invalid_response":  True,
         "exception_on_unexpected_response": True,
         "data_identifiers": {did: fixed_codec(length) for did, _, length, _ in DIDS},
-        "security_algo": lambda level, seed, params: (
-            int.from_bytes(seed, "big") ^ KEY_MASK
-        ).to_bytes(4, "big"),
+        "security_algo": lambda level, seed, params: compute_key(bytes(seed)),
     }
 
     exit_code = 0
@@ -210,7 +261,7 @@ def main():
                 results = []
                 for did, new_val in writes:
                     try:
-                        old_s, new_s = do_write(client, did, new_val)
+                        old_s, new_s = do_write(client, did, new_val, args.seed_algo)
                         results.append((did, True, old_s, new_s, None))
                     except Exception as e:
                         results.append((did, False, None, None, str(e)))
@@ -218,7 +269,7 @@ def main():
                         exit_code = 1
 
                 print()
-                print(f"UDS-Write via {args.host}:{args.port} ({args.channel})")
+                print(f"UDS-Write via {profile['host']}:{profile['port']} ({profile['channel']}, {args.adapter})")
                 print("─" * 70)
                 for did, ok, old_s, new_s, err in results:
                     label = DID_BY_ID[did][0] if did in DID_BY_ID else "?"
@@ -233,7 +284,7 @@ def main():
                 # READ-ONLY-MODE (T1)
                 rows = read_all(client)
                 print()
-                print(f"UDS-Lesen via {args.host}:{args.port} ({args.channel})")
+                print(f"UDS-Lesen via {profile['host']}:{profile['port']} ({profile['channel']}, {args.adapter})")
                 print("─" * 55)
                 for label, val in rows:
                     print(f"  {label:<10}: {val}")
