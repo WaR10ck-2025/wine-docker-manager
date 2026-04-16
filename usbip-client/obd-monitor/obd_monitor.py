@@ -5,15 +5,19 @@ OBD2 Live Monitor — SSH Terminal Dashboard
 
 Verwendung:
   python3 obd_monitor.py [--port /dev/ttyUSB0] [--debug]
+  python3 obd_monitor.py --tcp 192.168.10.213:35000         # ELM327 über TCP (Vgate iCar 2, ELM327-Sim, WiCAN Pro ELM-Mode)
 
 Steuerung im Terminal:
   r  → DTCs aktualisieren
   c  → DTCs löschen (mit Bestätigung)
   q  → Beenden
 
-Protokoll-Erkennung (automatisch):
+Protokoll-Erkennung (automatisch, nur bei --port):
   1. ELM327 AT-Probe (für CDP+ Klone mit ELM327-Firmware)
   2. ISO 9141-2 direkt via pyserial (5-Baud Init, für echten Autocom CDP+)
+
+Bei --tcp wird direkt ELM327 über socket://host:port verbunden (python-obd
+nutzt pyserial's TCP-URL-Handler transparent). Kein Auto-Detect, kein Fallback.
 """
 import argparse
 import logging
@@ -41,11 +45,23 @@ console = Console()
 
 # ── Protokoll-Erkennung ──────────────────────────────────────────────────────
 
-def detect_and_connect(port: Optional[str]):
+def detect_and_connect(port: Optional[str], tcp: Optional[str] = None):
     """
     Erkennt Protokoll und verbindet.
     Gibt (protocol_instance, actual_port) oder (None, None) zurück.
+
+    Bei `tcp` (Format "host:port") wird direkt ELM327 über socket:// verbunden,
+    ohne Auto-Detect und ohne ISO 9141-2-Fallback.
     """
+    if tcp:
+        url = f"socket://{tcp}"
+        console.print(f"[dim]Verbinde ELM327 via TCP ({url})...[/]")
+        proto = ELM327Protocol()
+        if proto.connect(url):
+            console.print(f"[green]ELM327 (TCP) verbunden ✓[/]")
+            return proto, url
+        return None, None
+
     target_port = port or _find_port()
     if not target_port:
         return None, None
@@ -169,16 +185,19 @@ def build_dashboard(
 
 # ── Haupt-Loop ───────────────────────────────────────────────────────────────
 
-def run_monitor(port: Optional[str], debug: bool):
+def run_monitor(port: Optional[str], tcp: Optional[str], debug: bool):
     log_level = logging.DEBUG if debug else logging.WARNING
     logging.basicConfig(level=log_level, format="[%(levelname)s] %(name)s: %(message)s")
 
     console.print()
     console.print("[bold white]OBD2 Monitor[/] — verbinde mit Fahrzeug...")
-    console.print("[dim]Zündung einschalten (Motor muss nicht laufen)[/]")
+    if tcp:
+        console.print(f"[dim]TCP-Modus: {tcp}[/]")
+    else:
+        console.print("[dim]Zündung einschalten (Motor muss nicht laufen)[/]")
     console.print()
 
-    proto, actual_port = detect_and_connect(port)
+    proto, actual_port = detect_and_connect(port, tcp)
     if not proto:
         console.print("[red]Verbindung fehlgeschlagen.[/]")
         console.print("[dim]Prüfen: CDP+ eingesteckt? Zündung an? Port korrekt?[/]")
@@ -236,8 +255,10 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--port", help="Serieller Port, z.B. /dev/ttyUSB0 (auto-detect wenn leer)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--port", help="Serieller Port, z.B. /dev/ttyUSB0 (auto-detect wenn leer)")
+    mode.add_argument("--tcp", metavar="HOST:PORT", help="ELM327 via TCP, z.B. 192.168.10.213:35000")
     parser.add_argument("--debug", action="store_true", help="Debug-Ausgabe aktivieren")
     args = parser.parse_args()
 
-    run_monitor(args.port, args.debug)
+    run_monitor(args.port, args.tcp, args.debug)

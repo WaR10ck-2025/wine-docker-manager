@@ -17,8 +17,8 @@ Der Router übernimmt dabei eine **Doppelrolle**:
 ║                                                                   ║
 ║  ┌─────────────┐  USB   ┌──────────────────────────┐            ║
 ║  │ CDP+ / GD101│ ──────▶│                          │  LAN        ║
-║  │ VIDA DiCE   │        │   GL.iNet Router          │ ─────────▶ Umbrel
-║  │ MVCI PRO+   │        │                          │  192.168.10.147
+║  │ VIDA DiCE   │        │   GL.iNet Router          │ ─────────▶ Proxmox LXC 212
+║  │ MVCI PRO+   │        │                          │  192.168.10.212
 ║  └─────────────┘        │  ┌─────────────────────┐ │
 ║                         │  │  usbipd (Pfad A)    │ │
 ║  ┌─────────────┐  WiFi  │  │  WiFi AP (Pfad B)   │ │
@@ -28,9 +28,10 @@ Der Router übernimmt dabei eine **Doppelrolle**:
 ║  └─────────────┘
 ╚══════════════════════════════════════════════════════════════════╝
 
-Umbrel-Server verbindet sich via:
+Proxmox LXC 212 (obd-monitor) verbindet sich via:
   Pfad A → usbip attach → /dev/ttyUSB0 → python-obd (serial) / VIDA
   Pfad B → TCP direkt  → 192.168.10.200 → python-can / udsoncan / obd TCP
+  Lab   → socket://192.168.10.213:35000 → ELM327-emulator (LXC 213, Stufe 0)
 ```
 
 ### Pfad A — USB/IP (USB-Adapter direkt am Router)
@@ -109,7 +110,7 @@ uci set dhcp.@host[-1].ip='192.168.10.200'
 uci commit dhcp && /etc/init.d/dnsmasq restart
 "
 
-# 3. Verbindung testen (Umbrel-Server)
+# 3. Verbindung testen (Proxmox LXC 212)
 python3 -c "
 import can
 bus = can.Bus(interface='socketcand', channel='can0',
@@ -134,7 +135,8 @@ ssh root@192.168.10.194 "/etc/init.d/usbipd restart && obd-ctl adapter"
 ```
 Heimnetz (192.168.10.0/24)
 │
-├── Umbrel-Server     192.168.10.147   (USB/IP-Client + Docker OBD2-Frontend)
+├── Proxmox LXC 212   192.168.10.212   (obd-monitor: USB/IP-Client + python-obd + Rich-Dashboard)
+├── Proxmox LXC 213   192.168.10.213   (obd-sim: ELM327-emulator auf :35000, Lab/Stufe 0)
 │
 ├── GL-BE3600 WiFi    192.168.10.194   (Slate 7      — Router + USB/IP-Server)
 ├── GL-E5800  WiFi    192.168.10.195   (Mudi 7       — Router + 5G + USB/IP)

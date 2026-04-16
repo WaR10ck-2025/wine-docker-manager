@@ -44,7 +44,14 @@ class ELM327Protocol(OBDProtocol):
     def connect(self, port: str) -> bool:
         try:
             import obd
-            self._conn = obd.OBD(port, fast=False, timeout=5)
+            kwargs = {"fast": False, "timeout": 5}
+            # python-obd 0.7.2 checkt in set_baudrate nur auf /dev/pts, nicht auf socket://.
+            # Bei TCP-URLs muss baudrate explizit gesetzt werden (skippt Auto-Baud),
+            # und check_voltage ausgeschaltet (ATRV-Query failt bei Simulatoren ohne 12V).
+            if port.startswith("socket://"):
+                kwargs["baudrate"] = 38400
+                kwargs["check_voltage"] = False
+            self._conn = obd.OBD(port, **kwargs)
             return self._conn.is_connected()
         except Exception as e:
             log.error(f"ELM327 connect fehlgeschlagen: {e}")
